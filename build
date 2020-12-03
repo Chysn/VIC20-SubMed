@@ -1,0 +1,9 @@
+#!/bin/bash
+
+xa -l toc -o ./vic/submed.bin ./src/submed.asm
+printf "\x01\x10" | cat - ./vic/submed.bin > ./vic/submed
+rm vic/submed.d64
+c1541 -format submed,8 d64 vic/submed.d64 -write vic/submed
+
+cp ./vic/submed ~/vic20/
+

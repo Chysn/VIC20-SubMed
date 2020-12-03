@@ -1,6 +1,6 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;
-;                                  Helix Colony
+;                                   Sub Med
 ;                            (c)2020, Jason Justian
 ;                  
 ; Assembled with XA
@@ -22,56 +22,47 @@
 * = $1001
 BASIC:      .byte $0b,$04,$2a,$00,$9e,$34,$31,$31
             .byte $30,$00,$00,$00,$00
+            jmp Startup
          
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; LABEL DEFINITIONS
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-; Starting Constants
-ST_ENERGY   = 200               ; Starting energy
-COLONISTS   = 6                 ; Starting colonists
-GEYSERS     = 48                ; Approximate number of geysers
-LENGTH      = 60                ; Days in a game
-
-; Scoring Constants
-COL_BONUS   = 50                ; Remaining colonist bonus
-MINE_COST   = 50                ; Energy cost of building a mine
-MINE_EN     = 3                 ; Daily energy from mine
 
 ; Constants - Game Configuration
-SCRCOM      = $08               ; Screen color
+SCRCOM      = 107               ; Screen color
 TXTCOL      = $01               ; Text color
-NORTH       = $01               ; Directional constants
-EAST        = $02               ; ,,
-SOUTH       = $03               ; ,,
-WEST        = $04               ; ,,
+UP          = $01               ; Directional constants
+RIGHT       = $02               ; ,,
+DOWN        = $03               ; ,,
+LEFT        = $04               ; ,,
 FIRE        = $05               ; Joystick fire button pressed
-PL_SPEED    = $02               ; Player speed (delay per pixel, in jiffies)
+PL_SPEED    = $05               ; Player speed (delay per pixel, in jiffies)
+SEALIFE_GEN = $30               ; Sealife generation frequency (jiffies)
+O2_START    = $20               ; Starting oxygen
+O2_RATE     = $80               ; Oxygen depletion rate (jiffies)
+
+; Score constants
+PICKUP      = 25                ; Score when a med pack is picked up
+DELIVERY    = 100               ; Score when a med pack is delivered
+O2_ADD      = $08               ; Oxygen added when surfacing
 
 ; Character constants
-CH_PLAYER   = $21               ; Player character code
 CO_PLAYER   = $07               ; Player color
-CH_LANDED   = $2c               ; Landed ship
-CH_GEYSER   = $2b               ; Geyser
-CO_GEYSER   = $00               ; Hidden geyser color
-CO_GEYSER_V = $09               ; Visible geyser color
-CH_SENSOR   = $26               ; Sensor signal level
-CO_SENSOR   = $01               ; Signal level color
-CH_BORDER   = $1f               ; Border
-CO_BORDER   = $05               ; Border color
-CH_LSENSOR  = $3b               ; Large sensor signal
-CH_BADMINE  = $24               ; Failed mine
-CO_BADMINE  = $02               ; Failed mine color
-CH_GOODMINE = $25               ; Successful mine
-CO_GOODMINE = $03               ; Successful mine color
-CH_COLONIST = $2a               ; Colonist
-CO_COLONIST = $05               ; Colonist color
-CHAR_S      = $22               ; Source bitmap character code
-CHAR_D      = $23               ; Destination bitmap character code
+CHAR_S      = $2e               ; Source bitmap character code
+CHAR_D      = $2f               ; Destination bitmap character code
+LANDCHAR    = $25               ; Land and sky character
+TOPLAND     = $26               ; Top land character
+CO_SKY      = $03               ; Sky color
+MEDPACK     = $1b               ; Med Pack
+SEABASE     = $00               ; Sea base
+FISH        = $27               ; School of fish
+CO_FISH     = $05               ; Fish color
+O2_CHAR     = $3a               ; Oxygen icon
 
 ; System Resources
 CINV        = $0314             ; ISR vector
-NMINV       = $0318             ; Release NMI vector
-;NMINV       = $fffe             ; Development NMI non-vector
+;NMINV       = $0318             ; Release NMI vector
+NMINV       = $fffe             ; Development NMI non-vector
 SCREEN      = $1e00             ; Screen character memory (unexpanded)
 COLOR       = $9600             ; Screen color memory (unexpanded)
 IRQ         = $eabf             ; System ISR   
@@ -98,15 +89,34 @@ CHROUT      = $ffd2             ; Output one character
 TIME_L      = $a2               ; Jiffy counter low
 TIME_M      = $a1               ; Jiffy counter middle  
 
-; wAxScore Constants
-NO_EFFECT   = $0f
-LEGATO_ON   = $3f
-LEGATO_OFF  = $4f
-
 ; Game Memory - Zeropage Pointers
 CURSOR      = $f9               ; Cursor (2 bytes)
 PLAYER      = $fb               ; Player location (2 bytes)
-CUR_NOTE    = $fd               ; Current score note (2 bytes)
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; VARIABLES
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; Game Data
+SCORE:      .byte $00,$00       ; Score
+HISCORE:    .byte $00,$00       ; High Score
+LEVEL:      .byte $00           ; Level
+HAVEMED:    .byte $00           ; Have med pack flag
+LAST_BASE   .byte $00,$00       ; Last base location
+DIR:        .byte $00           ; Direction
+TRAVEL:     .byte $02           ; Horizontal (RIGHT/LEFT) travel direction
+SUBCHAR:    .byte $2e           ; Character of player
+JOYREG:     .byte $00           ; Joystick register
+SUBSPEED:   .byte $00           ; Sub speed (lower is faster)
+SEALIFE_CD: .byte $00           ; Sealife movement countdown
+OXYGEN:     .byte $00           ; Oxygen
+SHOWSCORE   .byte $00           ; Score Bar show flag
+O2_CD       .byte $00           ; Oxygen depletion countdown
+
+; Sound Effects Player Memory
+REG_FX      .byte $00           ; Sound effects register
+FXLEN       .byte $00           ; Sound effects length
+FXCD        .byte $00           ; Sound effects countdown
+FXCDRS      .byte $00           ; Countdown reset value
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; MAIN PROGRAM
@@ -115,508 +125,253 @@ Startup:    jsr SetupHW         ; Set up hardware
             lda #$00            ; Initialize high score
             sta HISCORE         ; ,,
             sta HISCORE+1       ; ,,
-            sta LEVEL           ; Initialize level to "normal"
            
 ; Welcome Screen
 ; Show intro, set level, then show manual page      
-Welcome:    jsr wsStop
-            lda #$00            ; Shut off all sounds
+Welcome:    lda #$00            ; Shut off all sounds
             sta VOICEL          ; ,,
             sta VOICEM          ; ,,
             sta VOICEH          ; ,,
             sta NOISE           ; ,,
             jsr CLSR            ; Clear screen
-            ldy #5              ; Draw Hab
-            jsr TextLine        ; ,,
-            lda #<DrawHab       ; ,,
-            ldy #>DrawHab       ; ,,
-            jsr PRTSTR          ; ,,
             lda #<Intro         ; Show Intro
             ldy #>Intro         ; ,,
             jsr PRTSTR          ; ,,
-            jsr SetLevel        ; Set level
-            lda #<Manual
-            ldy #>Manual
-            jsr PRTSTR
+            jsr Wait4Fire       ; Wait for fire button
+            lda #<Manual        ; Show the game manual
+            ldy #>Manual        ; ,,
+            jsr PRTSTR          ; ,,
 
 ; Start a new game            
 Start:      jsr Wait4Fire
             jsr InitGame
 
 ; Main loop            
-Main:       bit SCORE_FLAG      ; The score flag is set by the ISR; check it
-            bpl ch_end          ;   and display the Score Bar if requested
-            jsr ScoreBar        ;   ,,
-ch_end:     lda COL_CT          ; Any colonists left?
-            beq game_over       ; ,,
-            lda DAY             ; Any time left?
-            cmp #LENGTH+1       ; ,,
-            bcc game_on         ; ,,
-            lda #LENGTH         ; Force display to final day number
-            sta DAY             ; ,,
-game_over:  jmp GameOver        ; Game Over if any game-ending conditions
-game_on:    jsr Joystick        ; Read the joystick
-            bne ch_fire         ; If no movement, draw the ship, shut off the
-            jsr RSCursor        ;   engine noise, and check the joystick again
-            jsr GetChar         ;   ,, (Don't redraw ship if landed)
-            cmp #CH_LANDED      ;   ,,
-            beq stop_eng        ;   ,,
-            lda #CH_PLAYER      ;   ,,
+Main:       bit SHOWSCORE
+            bpl control
+            lda #$00
+            sta SHOWSCORE
+            jsr ScoreBar
+control:    jsr Joystick        ; Read the joystick
+            bne ch_fire         ; If no movement, draw the sub, reduce the
+            jsr RSCursor        ;   speed
+            lda SUBCHAR         ;   ,,
             ldy #CO_PLAYER      ;   ,,
             jsr DrawChar        ;   ,,
-stop_eng:   lda #$00            ;   ,,
-            sta NOISE           ;   ,,
-            beq Main            ;   ,,
+            lda #PL_SPEED       ;   ,,
+            sta SUBSPEED        ;   ,,
+            bne Main            ; Check the joystick again
 ch_fire:    cmp #FIRE           ; Has fire been pressed?
-            bne han_dir         ; If not, handle a direction
-            jsr TogBuild        ; If fire, toggle the build flag
-            jmp Main
-han_dir:    bit BUILD_FLAG      ; Is the build flag on?
-            bpl norm_move       ; If not, do a normal directional move
-            jsr BuildMine       ; If build flag is on, build a mine
-            jmp Main
-norm_move:  jsr Move
+            bne handle_dir      ; If not, handle a direction
+            jmp Ping            ; Ping on fire
+handle_dir: jsr Move
+            jsr CheckMed        ; Are we on the med pack?
             jmp Main
             
  ; Custom ISR for music player and day counting
-ISR:        lda TIME_L
-            bne music
-            lda #$80
-            sta SCORE_FLAG
-            jsr DailyMaint      ; Daily energy maintenance production and usage
-            inc DAY
-music:      lda TIME_L          ; Flash aux color
-            and #$f0
-            eor VOLUME
-            sta VOLUME
-            jsr wsService       ; wAxScore Player
-            jsr NextFX          ; Sound Effect generator
-hw_irq:     jmp IRQ           
+ISR:        dec SEALIFE_CD
+            bne o2_deplete
+            lda SEALIFE_GEN     ; Reset countdown timer
+            sta SEALIFE_CD      ; ,,
+            lda CURSOR          ; Save the cursor position while in the ISR
+            pha                 ; ,,
+            lda CURSOR+1        ; ,,
+            pha                 ; ,,
+            jsr Swim
+            pla                 ; Restore the cursor position
+            sta CURSOR+1        ; ,,
+            pla                 ; ,,
+            sta CURSOR          ; ,,
+o2_deplete: dec O2_CD
+            bne isr_r
+            dec OXYGEN          ; Deplete oxygen
+            sec                 ; ,,
+            ror SHOWSCORE       ; ,,
+            lda #O2_RATE        ; Reset the countdown
+            sta O2_CD           ; ,,
+isr_r:      jmp IRQ           
             
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; GAME MECHANICS ROUTINES
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;            
-; New Ship
-; Return ship to starting point, decrement colonist count, launch sound, then
-; display the status bar
-NewShip:    lda COL_CT          ; Only present a new ship if there are
-            beq StatusBar       ;   colonists remaining
-            lda #" "            ; Initialize character under player
-            sta UNDER           ; ,,
-            lda #$e7            ; Initialize player loction
-            sta PLAYER          ; ,,
-            lda #$1e            ; ,,
-            sta PLAYER+1        ; ,,
-            lda #EAST           ; Move the ship away from the Hab
-            jsr Move            ; ,,
-            lda #EAST           ; ,,
-            jsr Move            ; ,,
-            jsr RSCursor        ; Place landed ship  
-            lda #CH_LANDED      ; ,,
-            ldy #CO_PLAYER      ; ,,
-            jsr DrawChar
-            lda #" "            ; Initialize character under player
-            sta UNDER           ; ,,
-            lda #$00
-            sta SENSOR_CT
-            ; Fall through to StatusBar
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;                        
+Ping:       jmp Main
 
-; Display Status Bar
-; At the bottom of the screen, and includes signal strength and colonist display
-StatusBar:  lda #$e4
-            sta CURSOR
-            lda #$1f
-            sta CURSOR+1
-            ldy #$15
-            lda #" "            
--loop:      sta (CURSOR),y
-            dey
-            bpl loop
-            ldy #$00
-            lda #CH_LSENSOR
-            sta SCRPAD
--loop:      cpy SENSOR_CT
-            beq col_disp
-            iny
-            lda SCRPAD
-            sta (CURSOR),y
-            inc SCRPAD
-            jmp loop
-col_disp:   lda #$f8
-            sta CURSOR
-            lda COL_CT          ; Get the number of colonists
-            beq status_r        ; If there are no colonists, don't show any
-            pha
--loop:      lda #CH_COLONIST
-            ldy #CO_COLONIST
-            jsr DrawChar
-            ldx #WEST
-            jsr MoveCursor
-            dec COL_CT
-            bne loop
-            pla
-            sta COL_CT
-status_r:   rts
-            
-; Score Bar
-ScoreBar:   lsr SCORE_FLAG      ; Clear score flag
-            lda #<ScEnergy
-            ldy #>ScEnergy
-            jsr PRTSTR
-            ldx ENERGY
-            lda ENERGY+1
-            jsr PRTFIX
-            lda #" "
-            jsr CHROUT
-            jsr CHROUT
-            lda #<ScDay
-            ldy #>ScDay
-            jsr PRTSTR
-            ldx DAY
-            cpx #LENGTH
-            bcc show_day
-            ldx #LENGTH
-show_day:   lda #$00
-            jmp PRTFIX
-            
-; Game Over
-GameOver:   lsr GAME_FLAG       ; Clear the game flag
-            jsr wsStop          ; Stop the music
-            lda #<GameOverTx    ; Show Game Over message
-            ldy #>GameOverTx    ; ,,
-            jsr PRTSTR          ; ,,
-            lda #$64
-            jsr Delay
-            lda COL_CT          ; If there are no colonists left, the player
-            beq scored          ;   gets no mine bonus
-            jsr CountCol        ; Count colonists for bonus
-            jsr CountMines      ; Count mines for bonus
-scored:     lda HISCORE+1       ; Is the last score greater than
-            cmp ENERGY+1        ;   the high score?
-            bcc new_hs          ;   ,,
-            bne show_hs         ;   ,,
-            lda ENERGY          ;   ,,
-            cmp HISCORE         ;   ,,
-            bcc show_hs         ;   ,,
-new_hs:     lda ENERGY          ; A new high score has been
-            sta HISCORE         ; achived; update high score
-            lda ENERGY+1        ; ,,
-            sta HISCORE+1       ; ,,        
-show_hs:    ldy #21             ; Show High Score
-            jsr TextLine        ; ,,
-            lda #<HiScoreTx     ; ,,
-            ldy #>HiScoreTx     ; ,,
-            jsr PRTSTR          ; ,,
-            ldx HISCORE         ; ,,
-            lda HISCORE+1       ; ,,
-            jsr PRTFIX          ; ,,
-            jsr ScoreBar
-            jmp Start        
+CheckMed:   bit HAVEMED         ; If the med pack is already picked up,
+            bmi check_r         ;   no need to check it
+            lda CURSOR+1
+            cmp #>SCREEN
+            bne check_r
+            lda CURSOR
+            cmp #155
+            bne check_r
+            ror HAVEMED         ; Set med pack flag
+            jsr ClrMedPack      ; Clear the med pack icon
+            lda OXYGEN          ; Add some oxygen as a bonus
+            clc                 ;   ,,
+            adc #O2_ADD         ;   ,,
+            sta OXYGEN          ;   ,,
+            cmp #O2_START       ; Ensure that the oxygen doesn't exceed the
+            bcc check_r         ;   starting level
+            lda #O2_START       ;   ,,
+            sta OXYGEN          ;   ,,
+            lda #PICKUP         ; Add points for pickup and display
+            jsr ScoreBar        ;   score bar update
+check_r:    rts
+
+; Set and Clear Med Pack
+SetMedPack: lda #MEDPACK
+            ldy #$0a
+            jmp DrawMed            
+
+ClrMedPack: lda #LANDCHAR
+            ldy #CO_SKY
+            jmp DrawMed                        
+
+; Draw Med Pack Location
+; Used by both SetMedPack and ClrMedPack
+DrawMed:    tax                 ; Save A in X while we mess with A
+            lda CURSOR          ; Save the current cursor
+            pha                 ; ,,
+            lda CURSOR+1        ; ,,
+            pha                 ; ,,
+            lda #133            ; Set the cursor to the med pack
+            sta CURSOR          ; ,,
+            lda #>SCREEN        ; ,,
+            sta CURSOR+1        ; ,,
+            txa                 ; Put the original A back
+            jsr DrawChar        ; Draw the character (color was in Y)
+            pla                 ; Restore the cursor back to
+            sta CURSOR+1        ;   its original location
+            pla                 ;   ,,
+            sta CURSOR          ;   ,,
+            rts
  
-; Count Colonists
-; At end of game
-CountCol:   ldy #$00
--loop:      lda $1fee,y
-            cmp #CH_COLONIST
-            bne nx_col
-            lda #$07
-            sta $97ee,y
-            ldx #COL_BONUS
-            jsr AddBonus
-            lda #CO_COLONIST
-            sta $97ee,y
-nx_col:     iny
-            cpy #$16
-            bne loop
-            rts
-col_bonus:  tya
-            pha
-                        
-; Count Mines
-; At end of game          
-CountMines: ldy #$00
--loop:      lda $1e00,y
-            cmp #CH_GOODMINE
-            bne ch_hi
-            lda #$07
-            sta $9600,y
-            ldx #MINE_COST
-            jsr AddBonus
-            lda #CO_GOODMINE
-            sta $9600,y
-ch_hi:      lda $1f00,y
-            cmp #CH_GOODMINE
-            bne nx_loc
-            lda #$07
-            sta $9700,y
-            ldx #MINE_COST
-            jsr AddBonus
-            lda #CO_GOODMINE
-            sta $9700,y
-nx_loc:     iny
-            bne loop
-            rts     
-
-; Add Bonus
-; for end of game
-; Bonus Amount in X
-AddBonus:   tya
-            pha
-            txa
-            jsr AddEnergy
-            jsr ScoreBar
-            lda #$03
-            jsr Sound
-            lda #$08
-            jsr Delay
-            pla
-            tay
-            rts
-                                
-; Toggle Build Flag
-; Then draw the ship, either landed or flying
-TogBuild:   jsr RSCursor        ; Set Cursor to the player position
-            ldy #CH_PLAYER      ; Set a default character
-            bit BUILD_FLAG      ; Check the build flag
-            bmi clear_bf        ; If it's set, clear it
-set_bf:     lda #$80            ; If it's clear, set it
-            sta BUILD_FLAG      ; ,,
-            ldy #CH_LANDED      ; And also change the default character (land)
-            bne draw_ship
-clear_bf:   lsr BUILD_FLAG      ; Clear the build flag
-draw_ship:  tya                 ; Draw the ship based on the new state
-            ldy #CO_PLAYER      ; ,,
-            jsr DrawChar        ; ,,
-            bit BUILD_FLAG      ; Select music based on state of flag
-            bpl build_off       ; ,,
-            ldy #22             ; Show help for build
-            jsr TextLine        ; ,,
-            lda #<BuildTx       ; ,,
-            ldy #>BuildTx       ; ,,
-            jsr PRTSTR          ; ,,
-            jmp debounce
-build_off:  jsr StatusBar       ; Replace help with status bar
-debounce:   lda #$14            ; Short delay to debounce the fire button
-            jmp Delay           ; ,,
-
-; Build Mine
-BuildMine:  ldy ENERGY+1        ; Make sure that the colony has enough
-            bne has_enough      ;   energy to build a mine
-            ldy ENERGY          ;   ,,
-            cpy #MINE_COST      ;   ,,
-            bcs has_enough      ;   ,,
-            lda #$05            ; If there's not enough energy, play a
-            jsr Sound           ;   signal and
-            jmp TogBuild        ;   turn off build mode
-has_enough: jsr RSCursor
+; Touch Base
+; The base has been encountered, so determine what to do
+TouchBase:  bit HAVEMED         ; Does the player have the med pack?
+            bmi have_med        ; If not, do nothing
+            rts                 ; ,,
+have_med:   clc                 ; Clear the med pack flag
+            ror HAVEMED         ; ,,
+            jsr SetMedPack      ; Show the med pack at the lighthouse
+            lda #DELIVERY       ; Add the delivery to the score
+            clc                 ; And add remaining oxygen as a bonus
+            adc OXYGEN          ; ,,
+            jsr ScoreBar        ; ,,
+            jmp LevelUp         ; Move the base and advance the level
+            
+; Level Up
+; Move Sea Base to next level            
+LevelUp:    inc LEVEL
+            ldx LEVEL
+            cpx #$01
+            beq new_base
+            lda LAST_BASE
+            sta CURSOR
+            lda LAST_BASE+1
+            sta CURSOR+1
+            lda #TOPLAND
+            ldy #08
+            jsr DrawChar
+            ldx LEVEL
+new_base:   cpx #$08                ; Base position maxes out at level 8
+            bcc get_pos             ; ,,
+            ldx #$08                ; ,,
+get_pos:    lda LevelPos,x          ; Get base postion from the table
+            sta $02                 ; Save for horizontal movement iterator
+drop_base:  lda #154
+            sta CURSOR
+            lda #>SCREEN
+            sta CURSOR+1
+-loop:      ldx #RIGHT
             jsr MoveCursor
-            jsr GetChar         ; Get the character at the move location
-            cmp #CH_GEYSER      ; Is it a geyser?
-            beq build_good      ; If so, build a successful mine
-            cmp #" "            ; Is it a border or hab?
-            bcc build_r         ; If so, do nothing
-            cmp #CH_GOODMINE    ; Is there already a mine at this location?
-            beq build_r         ; ,,
-            cmp #CH_BADMINE     ; ,,
-            beq build_r         ; ,,
-            lda #$01            ; Failed mine sound
-            jsr Sound           ; ,,
-            lda #CH_BADMINE
-            ldy #CO_BADMINE
-            bne draw_mine
-build_good: inc MINE_CT         ; Increment successful mine count
-            lda #$00            ; Successful mine sound
-            jsr Sound           ; ,,
-            lda #CH_GOODMINE
-            ldy #CO_GOODMINE
-draw_mine:  jsr DrawChar 
-            lda #MINE_COST      ; Pay for the mine
-            jsr UseEnergy       ; ,,
-build_r:    jmp TogBuild        ; Clear the build flag and return 
-       
-; Use Energy  
-; In A          
-UseEnergy:  sta SCRPAD
-            lda ENERGY
-            sec
-            sbc SCRPAD
-            sta ENERGY
-            bcs pos
-            dec ENERGY+1
-ch_pos:     lda ENERGY+1        ; Constrain energy to positive
-            bpl pos             ; ,,
-            lda #$00            ; ,,
-            sta ENERGY          ; ,,
-            sta ENERGY+1        ; ,,
-pos:        lda #$80
-            sta SCORE_FLAG
-            rts
-            
-; Add Energy
-; In A
-AddEnergy:  clc
-            adc ENERGY
-            sta ENERGY
-            bcc add_r
-            inc ENERGY+1
-add_r:	    jmp pos                      
-
-; Daily Energy Maintenance
-DailyMaint: bit GAME_FLAG       ; Don't do daily maintenance if the
-            bpl maint_r         ;   game is over
-            ldy MINE_CT         ; Each successful mine generates energy
-            beq maint_use       ; No mines
--loop:      lda #MINE_EN        ;   every day
-            jsr AddEnergy       ;   ,,
-            dey                 ;   ,,
-            bne loop            ;   ,,
-maint_use:  lda #$01            ; The colonists use one energy per day
-            jsr UseEnergy       ; ,,            
-maint_r:    rts            
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-; WAXSCORE IRQ PLAYER
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-; Reset Score to Start
-wsReset:    lda #<Theme
-            sta CUR_NOTE
-            lda #>Theme
-            sta CUR_NOTE+1
-            lda #$00
-            sta COUNTDOWN
-            sta LEGATO
-            rts
-
-; Begin Playing
-wsPlay:     lda ENABLE_MUS
-            beq play_r
-            lda #$80
-            sta PLAY_FLAG
-play_r:     rts
-            
-; Stop Playing
-wsStop:     lda #$00
-            sta PLAY_FLAG
-            sta VOICEM
-            sta VOICEL
-            sta NOISE
-            rts
-            
-; Service Routine           
-wsService:  bit PLAY_FLAG
-            bpl svc_r
-            lda COUNTDOWN
-            beq fetch_note
-            cmp #$03            ; Handle legato playing by stopping
-            bcs keep_on         ;   a non-legato note with a few
-            bit LEGATO          ;   jiffies before the end of the
-            bmi keep_on         ;   duration. Legato notes are kept on
-            lda #$00
-            sta VOICEM
-keep_on:    dec COUNTDOWN
-            lda VOLUME
-            and #$0f
-            cmp #$0f
-            beq svc_r
-            inc VOLUME
-            rts
-fetch_note: ldx #$00
-            stx COUNTDOWN       ; Initialize countdown
-            lda (CUR_NOTE,x)
-            beq eos             ; End of score
-            tay                 ; Y holds the full note data
-            and #$0f            ; Mask away the duration
-            cmp #$0f            ; Is this a effect?
-            beq wsEffect
-            tax
-            lda Oct0,x
-            sta VOICEM
-            lda DIR             ; If the ship is in motion, don't
-            bne keep_vol        ;   mess with the volume
-            tya                 ; If the duration is shorter than a
-            cpy #$30            ;   dotted quarter note, don't mess
-            bcc keep_vol        ;   with the volume
-            lda #$00            ; Start at min volume
-            sta VOLUME          ; ,,
-keep_vol:   tya
-            and #$f0            ; Mask away the note index
-            lsr
-            lsr
-            lsr
-            lsr
-            ldy TEMPO
--loop:      clc
-            adc COUNTDOWN
-            sta COUNTDOWN
-            dey
+            dec $02
             bne loop
-NextNote:   inc CUR_NOTE
-            bne svc_r
-            inc CUR_NOTE+1
-svc_r:      rts
-eos:        jsr wsReset
-            rts       
-
-; Apply Effect
-; The effect command is in Y            
-wsEffect:   cpy #NO_EFFECT      ; Handle Placeholder
-            beq effect_r        ; ,,
-ch_legato:  cpy #LEGATO_ON      ; Handle legato
-            bne ch_leg_off      ; ,,
-            lda #$80            ; ,,
-            sta LEGATO          ; ,,
-            jmp NextNote
-ch_leg_off: cpy #LEGATO_OFF     ; Handle legato off
-            bne effect_r        ; ,,
-            lsr LEGATO          ; ,,
-effect_r:   jmp NextNote                       
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;;; EFFECT PLAYER SUBROUTINES
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-; Play Next Sound Effect
-; Rotates the 8-bit sound effect register and
-; plays the pitch      
-NextFX:     lda FXLEN           ; Has the sound been launched?
-            beq endfx           ; If unlaunched, kill voice and return
-            dec FXLEN
-            dec FXCD
-            bne fx_r
-            lda FXCDRS          ; Reset the countdown
-            sta FXCD            ; ,,
-            lda #$00            ; Rotate the register left
-            asl REG_FX          ; ,,
-            adc REG_FX          ; ,,
-            sta REG_FX          ; ,,
-            ora #$80            ; Gate the high voice
-endfx:      sta VOICEH          ; ,,
-fx_r:       rts      
-        
-; Launch Sound Effect
-; Preparations
-;     A - The sound effect index
-Sound:      sei                 ; Don't play anything while setting up
-            stx SCRPAD
-            asl                 ; Each effect has two parameters in the
-                                ;   table, register and length (in
-                                ;   jiffies)
-            tax
-            lda FXType,X        ; Get the register
-            sta REG_FX          ;   and activate it
-            inx
-            lda FXType,X        ; Get the length
-            and #$F0            ;   ,,
-            sta FXLEN           ;   and set it
-            lda FXType,X
-            and #$0F
-            sta FXCDRS          ; Record the reset value
-            sta FXCD            ; Set the countdown
-            ldx SCRPAD
-            lda #$fc            ; Set high volume
-            sta VOLUME          ; ,,
-            cli                 ; Go! 
+ch_floor:   jsr GetChar
+            cmp #TOPLAND
+            beq draw_base
+            ldx #DOWN
+            jsr MoveCursor
+            jmp ch_floor
+draw_base:  lda CURSOR
+            sta LAST_BASE
+            lda CURSOR+1
+            sta LAST_BASE+1
+            lda #SEABASE
+            ldy #$01
+            jmp DrawChar
+            
+; Swim
+; Move each fish to the left                   
+Swim:       ldy #$00
+-loop:      lda $1e00,y
+            cmp #FISH
+            beq MoveFishL
+            cmp #FISH+1
+            beq MoveFishL
+high_f0:    lda $1f00,y
+            cmp #FISH
+            beq MoveFishH
+            cmp #FISH+1
+            beq MoveFishH
+next_cell:  iny
+            bne loop
+            ; Fall through to Spawn
+  
+; Spawn
+; Generate new fish
+Spawn:      jsr BASRND          ; Get random number, for the placement of
+            lda RNDNUM          ;   a fish on the right-hand side of the
+            and #%00000111      ;   screen
+            tay                 ;   ,,
+            iny                 ;   ,,
+            sty $02             
+            lda #153
+            sta CURSOR
+            lda #>SCREEN
+            sta CURSOR+1
+-loop:      ldx #DOWN
+            jsr MoveCursor
+            dec $02
+            bne loop
+            lda #FISH
+            ldy #CO_FISH
+            jsr DrawChar
             rts
-        
+
+; Move Fish
+; To a location to the left of its current location            
+MoveFishL:  ldx #$1e
+            .byte $3c           ; Skip word
+MoveFishH:  ldx #$1f
+            stx CURSOR+1
+            sty CURSOR
+            cmp #FISH
+            beq half_move
+            lda #$20            ; Replace fish with water
+            ldy #$06            ; ,,
+            jsr DrawChar        ; ,,
+            ldx #LEFT           ; Move to the fish's new candidate position
+            jsr MoveCursor      ; ,,
+            jsr GetChar         ; What's there now?
+            cmp #FISH           ; Is it a fish or sub character?
+            bcs redraw          ; If so, redraw
+            cmp #$20            ; A fish may only move to an unoccupied
+            bne fish_exit       ;   position
+            lda #FISH           ; The position to the left is unoccupied, so
+            ldy #CO_FISH        ;   move the fish here
+            jsr DrawChar        ;   ,,
+fish_exit:  ldy CURSOR          ; Restore Y to its previous value, since it's
+            iny                 ;   an iterator within the caller
+            jmp next_cell 
+redraw:     ldx #RIGHT
+            jsr MoveCursor              
+half_move:  lda #FISH+1
+            ldy #CO_FISH
+            jsr DrawChar
+            ldy CURSOR
+            jmp next_cell         
+                                                                                           
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; SUBROUTINES
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -656,25 +411,96 @@ Delay:      clc
             adc TIME_L
 -loop:      cmp TIME_L
             bne loop
-            rts     
+            rts  
 
+; Score
+; Add score in Accumulator (positive or negative), then show
+; score bar
+ScoreBar:   clc
+            adc SCORE
+            sta SCORE
+            lda #$00
+            adc SCORE+1
+            sta SCORE+1
+            lda HISCORE+1       ; Is the last score greater than
+            cmp SCORE+1         ;   the high score?
+            bcc new_hs          ;   ,,
+            bne show_score      ;   ,,
+            lda SCORE           ;   ,,
+            cmp HISCORE         ;   ,,
+            bcc show_score      ;   ,,
+new_hs:     lda SCORE           ; A new high score has been
+            sta HISCORE         ; achived; update high score
+            lda SCORE+1         ; ,,
+            sta HISCORE+1       ; ,,                
+show_score: jsr ShowScore
+            lda #O2_CHAR
+            jsr CHROUT
+            lda OXYGEN          ; Get the current oxygen level
+            beq GameOver        ; End game if oxygen goes to 0
+            sta $02             ; Oxygen counter
+            cmp #$06            ; If the oxygen gets low, make the
+            bcs o2_bar          ;   oxygen bar red
+            lda #$9c            ;   ,,
+            jsr CHROUT          ;   ,,
+            lda $02             ;   ,,
+o2_bar:     cmp #$04
+            bcc finish          ; If oxygen is under 4, then wrap it up
+            lda #O2_CHAR+1
+            jsr CHROUT
+            lda $02            
+            sec
+            sbc #$04
+            sta $02
+            jmp o2_bar
+finish:     lda #$3f
+            sec
+            sbc $02
+            jsr CHROUT          ; Add the end of the oxygen meter
+            rts
+            
+GameOver:   jsr ShowScore
+            lda #<HiTx
+            ldy #>HiTx
+            jsr PRTSTR
+            ldx HISCORE
+            lda HISCORE+1
+            jsr PRTFIX
+            lda #<GameOverTx
+            ldy #>GameOverTx
+            jsr PRTSTR
+            lda #$00
+            sta VOLUME
+            jsr RSCursor
+            jsr GetChar
+            ldy #$00
+            jsr DrawChar
+            sei
+            jmp Start
+            
+; Show Score
+; For score bar and game over            
+ShowScore:  lda #<ScoreTx
+            ldy #>ScoreTx
+            jsr PRTSTR
+            ldx SCORE
+            lda SCORE+1
+            jsr PRTFIX
+            lda #" "
+            jmp CHROUT
+            
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; MOVEMENT ROUTINES
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;            
-; Move character in direction specified in A
-Move:       ldy ENERGY+1        ; Does the player have enough energy to move?
-            bne may_move        ; ,,
-            ldy ENERGY          ; ,,
-            bne may_move        ; ,,
-            lda #$05            ; If there's no enough energy to move, play
-            jsr Sound           ;   the out-of-energy sound, and don't move
-            lda #$10            ; Delay so that the sound can finish
-            jsr Delay           ; ,,
-            lda MINE_CT         ; If the player tried to move, was out of
-            bne no_move         ;   energy, and has no way to get more
-            jmp GameOver        ;   energy, end the game.
-no_move:    rts                 ; Return with no movement
-may_move:   sta DIR             ; Set the direction
+; Move player in direction specified in A (UP, DOWN, RIGHT, LEFT)
+Move:       cmp #DOWN           ; If moving up or down, there's no need to check 
+            beq not_turn        ;   for a directional change
+            cmp #UP             ;   ,,
+            beq not_turn        ;   ,,
+            cmp TRAVEL          ; Has direction of travel (RIGHT, LEFT) changed?
+            beq not_turn        ; If so, do a turning maneuver instead of
+            jmp Turn            ;   moving
+not_turn:   sta DIR             ; Set the direction
             jsr PickChar        ; Set Cursor to the right source character
             ldy #$07            ; Initialize the source and destination
 -loop:      lda #$00            ;   characters in the character set
@@ -684,134 +510,79 @@ may_move:   sta DIR             ; Set the direction
             dey                 ;   ,,
             bpl loop            ;   ,,
             jsr RSCursor
-            lda #$ff            ; Play engine noise
-            sta NOISE           ; ,,
             lda #CHAR_S         ; Draw the bitmap source character at the
             ldy #CO_PLAYER      ;   player location
             jsr DrawChar        ;   ,,
             ldx DIR             ; Move the cursor
             jsr MoveCursor      ; ,,
-            jsr GetChar         ; Get the character at the Cursor location and
-            cmp #CH_BORDER+1    ; If there's a border or hab, do not move
-            bcs do_move         ; ,,
+            jsr GetChar         ; Get the character at the Cursor location
+            cmp #SEABASE        ; If it's a base, handle it
+            bne is_clear        ; ,,
+            jmp TouchBase       ; ,,
+is_clear:   cmp #$20            ; If there's a non-space, do not move
+            beq do_move         ; ,,
             rts                 ; ,,
-do_move:    pha                 ; Put character on stack for later use as UNDER
-            jsr GetColor        ; Get the color at the Cursor location and
-            pha                 ;   put it on the stack, too
-            lda #CHAR_D         ; Draw the bitmap destination character at the
+do_move:    lda #CHAR_D         ; Draw the bitmap destination character at the
             ldy #CO_PLAYER      ;   destination location with player color
             jsr DrawChar        ;   ,,
             ldx #$08            ; Move the character 8 pixels in the selected
 -loop:      jsr MoveBitmap      ;   direction, with a short delay between each
-            lda #PL_SPEED       ;   movement
+            lda #$90            ;   pixel. The engine sound is a pulse
+            sta VOICEM          ;   followed by silence.
+            lda #01             ;   ,,
+            jsr Delay           ;   ,,
+            lda #$00            ;   ,,
+            sta VOICEM          ;   ,,
+            lda SUBSPEED        ;   ,,
             jsr Delay           ;   ,,
             dex                 ;   ,,
             bne loop            ;   ,,
-            lda UNDER           ; Get the character that was under the player
-            ldx #$00            ;   and replace it
+            lda #$20            ; Replace the character with a space
+            ldx #$00            ;   ,,
             sta (PLAYER,x)      ;   ,,
-            lda PLAYER+1        ;   ,,
-            pha                 ;   ,,
-            clc                 ;   ,,
-            adc #$78            ;   ,,
-            sta PLAYER+1        ;   ,,
-            lda UNDER_COL       ;   ,,
-            sta (PLAYER,x)      ;   ,,
-            pla                 ;   ,,
-            sta PLAYER+1        ;   ,,
-            pla                 ; Get the color that was under the destination
-            sta UNDER_COL        ;   off the stack and save it
-            pla                 ; Get the character that WAS under the
-            sta UNDER           ;   destination off the stack and save it
             jsr UDPlayer        ; Update player location
-            lda #$01            ; Take one energy unit per turn
-            jsr UseEnergy       ; ,,
-            lda #$00            ; Set DIR to 0, which will allow volume to go
-            sta DIR             ;   low via the music player
-            ; Fall through to Sensor
+            lda #$00            ; Set DIR to 0
+            sta DIR             ; ,,
+            dec SUBSPEED        ; Pick up speed with each movement until the
+            lda SUBSPEED        ;   sub is turned, or until the joystick is
+            cmp #$01            ;   released.
+            bne move_r          ; But enforce a maximum speed
+            lda #$02            ; ,,
+            sta SUBSPEED        ; ,,
+move_r:     rts
 
-; Activate Sensor    
-; Check the area around the player for geysers and upate the character
-; memory and Status Bar with the results        
-Sensor:     ldx #$00
-            stx SENSOR_CT
-            lda UNDER
-            cmp #CH_GEYSER
-            beq Dead
-            ldy #$00
--loop:      tya
-            pha
-            lda SearchPatt,y
-            tax
-            jsr MoveCursor
-            ldx #$00
-            lda (CURSOR,x)
-            cmp #CH_GEYSER
-            beq detected
-            cmp #CH_GOODMINE
-            bne no_geyser
-detected:   inc SENSOR_CT
-no_geyser:  pla
-            tay
-            iny
-            cpy #$08
-            bne loop
-            lda SENSOR_CT
-            beq sensor_r
-            cmp #$05
-            bcc add_sensor
-            lda #$04
-add_sensor: sta SENSOR_CT
-            ldy UNDER           ; Don't overwrite mines with sensor
-            cpy #CH_BADMINE     ;   readings
-            beq sensor_r        ;   ,,
-            cpy #CH_GOODMINE    ;   ,,
-            beq sensor_r        ;   ,,
-            clc
-            adc #CH_SENSOR-1
-            sta UNDER
-            lda #CO_SENSOR
-            sta UNDER_COL
-sensor_r:   jmp StatusBar
-
-; Player hit Geyser 
-; Move player back to starting point           
-Dead:       lda #$7f            ; Set aux color and high volume
-            sta VOLUME          ; ,,
-            lda #$d0            ; Explosion noise
-            sta NOISE           ; ,,
-            lda #CH_PLAYER      ; Set character of destroyed ship
-            ldy #$0c            ; Set color of destroyed ship
+; Turn
+; Perform a turning maneuver in the direction (RIGHT, LEFT) in Accumulator
+Turn:       sta TRAVEL          ; Switch the direction of travel
+            lda #PL_SPEED       ; Reset the sub speed to slowest
+            sta SUBSPEED        ; ,,
+            jsr RSCursor
+next_turn:  lda SUBCHAR         ; Start turn with the current character
+            ldy #CO_PLAYER      ; ,,
             jsr DrawChar        ; ,,
-            lda #$10
-            jsr Delay
-            lda #$00            ; Set character of destroyed ship
-            ldy #$09            ; Set color of destroyed ship
-            jsr DrawChar        ; ,,
-            lda #$02            ; Killed colonist sound
-            jsr Sound           ; ,,
-            lda #$40            ; Delay for destruction
+            lda #04             ; Delay so the turn can be seen
             jsr Delay           ; ,,
-            lda #$00            ; Shut off the explosion sound
-            sta NOISE           ; ,,
-            lda #CH_GEYSER      ; Mise well show the player where the
-            ldy #CO_GEYSER_V    ;   geyser is
-            jsr DrawChar        ;   ,,
-            lda #$30            ; Another delay for destruction
-            jsr Delay           ; ,,
-            dec COL_CT          ; Kill off a colonist. Way to go, player ;(
-            bpl next_ship       ; Enforce low range of 0
-            lda #$00            ; ,,
-            sta COL_CT          ; ,,
-next_ship:  jmp NewShip
+            lda TRAVEL          ; Check the new directon of travel
+            cmp #LEFT           ; If the new direction is left, then decrement
+            bne turn_right      ;   the sub character until it gets to $29
+            dec SUBCHAR         ;   ,,
+            lda #$29            ;   ,,
+            cmp SUBCHAR         ;   ,,
+            bne next_turn       ;   ,,
+            rts                 ; Leftward turn is done
+turn_right: inc SUBCHAR         ; If the new direction is right, then increment
+            lda #$2d            ;   the sub character until it gets to $2d
+            cmp SUBCHAR         ;   ,,
+            bne next_turn       ;   ,,
+turn_r:     rts                 ; Rightward turn is done
 
 ; Move Bitmap
 MoveBitmap: lda DIR
-            cmp #NORTH
+            cmp #UP
             beq mv_north
-            cmp #EAST
+            cmp #RIGHT
             beq mv_east
-            cmp #SOUTH
+            cmp #DOWN
             beq mv_south
             ; Fall through to mv_west
 mv_west:    ldy #$07            ; For each byte
@@ -893,21 +664,12 @@ GetChar:    ldx #$00
             lda (CURSOR,x)
             rts            
 
-; Get Color at Cursor
-; Return color code in A
-GetColor:   lda CURSOR+1
-            pha
-            clc
-            adc #$78            ; Color location is $7800 more than screen
-            sta CURSOR+1
-            ldx #$00
-            lda (CURSOR,x)
-            tax
-            pla                 ; Reset CURSOR to screen pointer
-            sta CURSOR+1        ; ,,
-            txa
-            rts
-            
+; Draw Character at Cursor
+; A is the character, Y is the color           
+DrawChar:   ldx #$00
+            sta (CURSOR,x)
+            ; Fall through to SetColor
+
 ; Set Color at Cursor
 ; Use color code in Y
 SetColor:   lda CURSOR+1
@@ -921,13 +683,7 @@ SetColor:   lda CURSOR+1
             pla
             sta CURSOR+1
             rts
-  
-; Draw Character at Cursor
-; A is the character, Y is the color           
-DrawChar:   ldx #$00
-            sta (CURSOR,x)
-            jmp SetColor
-            
+
 ; Move Cursor
 ; In the direction specified by X
 MoveCursor: lda DirTable,x
@@ -948,12 +704,19 @@ sign:       tay                 ; ,,
 ; Pick Character
 ; Depending on which direction the player is moving, a different character
 ; will be loaded into the source bitmap character. Direction is in A.
-PickChar:   tax
-            lda PlSrcL,x
+PickChar:   lda TRAVEL
+            cmp #LEFT
+            beq pick_left
+            lda #<PL_RIGHT
             sta CURSOR
-            lda PlSrcH,x
+            lda #>PL_RIGHT
             sta CURSOR+1
-            rts 
+            rts
+pick_left:  lda #<PL_LEFT
+            sta CURSOR
+            lda #>PL_LEFT
+            sta CURSOR+1
+            rts            
             
 ; Postion Text
 ; To line in Y            
@@ -971,12 +734,10 @@ TextLine:   lda #$13            ; Home cursor
 ; Setup Hardware
 SetupHW:    lda TIME_L          ; Seed random number generator
             sta RNDNUM          ; ,,
-            lda #SCRCOM         ; Set background color
+            lda #110            ; Set background color
             sta BACKGD          ; ,,
             lda #$ff            ; Set custom character location
             sta VICCR5          ; ,,
-            lda #$4f            ; Set volume and aux color
-            sta VOLUME          ; ,,
             lda #$00            ; Initialize sound registers
             sta VOICEM          ; ,,
             sta VOICEH          ; ,,
@@ -984,359 +745,173 @@ SetupHW:    lda TIME_L          ; Seed random number generator
             sta NOISE           ; ,,
             lda #$7f            ; Set DDR to read East
             sta VIA2DD          ; ,,
-            lda #$80            ; Disabled Commodore-Shift
+            lda #$80            ; Disable Commodore-Shift
             sta CASECT          ; ,,
             lda #TXTCOL         ; Set color of screen text, like
             sta TCOLOR          ;   intro, game over, score, etc.
+            lda #<Welcome       ; Install the custom NMI (restart)
+            sta NMINV           ; ,, 
+            lda #>Welcome       ; ,,
+            sta NMINV+1         ; ,,
+            rts
+            
+; Initialize Game
+InitGame:   lda #SCRCOM         ; Set background color
+            sta BACKGD          ; ,,
+            jsr CLSR            ; Clear Screen
+            lda #$8f            ; Set volume and aux color
+            sta VOLUME          ; ,,
+            lda #$00            ; Initialize score and level
+            sta SCORE           ; ,,
+            sta SCORE+1         ; ,,
+            sta LEVEL           ; ,,
+            sta SHOWSCORE       ; ,,
+            sta HAVEMED         ; Clear med pack flag
+            lda #O2_START       ; Initialize oxygen
+            sta OXYGEN          ; ,,
+            lda #179            ; Initialize player position
+            sta PLAYER          ; ,,
+            lda #$1e            ; ,,
+            sta PLAYER+1        ; ,,
+            lda #RIGHT          ; Initialize direction
+            sta TRAVEL          ; ,,
+            lda #$2d            ; ,,
+            sta SUBCHAR         ; ,,
+            lda #132            ; Seven rows of sky
+            sta $02             ; ,,
+            lda #<SCREEN+22     ; Set cursor to second line
+            sta CURSOR          ; ,,
+            lda #>SCREEN        ; ,,
+            sta CURSOR+1        ; ,,
+next_sky:   lda #LANDCHAR       ; Draw some sky
+            ldy #CO_SKY         ; ,,
+            jsr DrawChar        ; ,,
+            ldx #RIGHT          ; Advance to next location
+            jsr MoveCursor
+sky_adv:    dec $02             ; Until done
+            bne next_sky        ; ,,
+            lda CURSOR          ; Draw Lighthouse
+            sbc #43             ; ,,
+            sta CURSOR          ; ,,
+            lda #$23            ; ,,
+            ldy #$03            ; ,,
+            jsr DrawChar        ; ,,
+            ldx #DOWN           ; ,,
+            jsr MoveCursor      ; ,,
+            lda #$24            ; ,,
+            ldy #$03            ; ,,
+            jsr DrawChar        ; ,,
+            lda #16             ; Draw land edge
+            sta $02             ; ,,
+next_land:  ldx #DOWN           ; ,,
+            jsr MoveCursor      ; ,,
+            lda #LANDCHAR       ; ,,
+            ldy #$0f            ; ,,
+            jsr DrawChar        ; ,,
+            dec $02             ; ,,
+            bne next_land       ; ,,
+            lda #21             ; Draw ocean floor
+            sta $02             ; ,,
+next_floor: ldx #RIGHT          ; ,,
+            jsr MoveCursor      ; ,,
+            lda CURSOR          ; ,,
+            pha                 ; ,,
+            lda CURSOR+1        ; ,,
+            pha                 ; ,,
+            jsr BASRND          ; ,,
+            lda RNDNUM          ; ,,
+            and #%00000111      ; ,,
+            sta $03             ; ,,
+            inc $03             ; ,,
+next_reef:  lda #LANDCHAR       ; ,,
+            ldy #$0f            ; ,,
+            jsr DrawChar        ; ,,
+            ldx #UP             ; ,,
+            jsr MoveCursor      ; ,,
+            dec $03             ; ,,
+            bpl next_reef       ; ,,
+            ldx #DOWN           ; ,,
+            jsr MoveCursor      ; ,,
+            lda #TOPLAND        ; ,,
+            ldy #$0f            ; ,,
+            jsr DrawChar        ; ,,
+            pla                 ; ,,
+            sta CURSOR+1        ; ,,
+            pla                 ; ,,
+            sta CURSOR          ; ,,
+            dec $02             ; ,,
+            bne next_floor      ; ,,
+            jsr SetMedPack      ; Turn on MedPack
+            jsr LevelUp         ; Move Seabase to level 1
+            lda #$00            ; Initialize the score bar
+            jsr ScoreBar        ; ,,
+            lda #SEALIFE_GEN    ; Set sealife generation countdown
+            sta SEALIFE_CD      ; ,,
+            lda #O2_RATE        ; Set oxygen depletion countdown
+            sta O2_CD           ; ,,
             sei                 ; Install the custom ISR
             lda #<ISR           ; ,,
             sta CINV            ; ,,
             lda #>ISR           ; ,,
             sta CINV+1          ; ,,
-            lda #<Welcome       ; Install the custom NMI (restart)
-            sta NMINV           ; ,, 
-            lda #>Welcome       ; ,,
-            sta NMINV+1         ; ,,
-            cli
+            cli                 ; ,,
             rts
-            
-; Initialize Game
-InitGame:   jsr CLSR
-            jsr wsReset         ; Reset music
-            jsr wsPlay          ; Start music
-init_build: lda #$00            ; Initialize build flag
-            sta BUILD_FLAG      ; ,,
-            sta MINE_CT         ; Initialize successful mine count
-            sta SENSOR_CT       ; Initialize sensor count
-            lda #COLONISTS      ; Initialize colonist count
-            sta COL_CT          ; ,,
-            ldy #GEYSERS/2      ; Place geysers
--loop:      jsr NewGeyser       ; ,,
-            dey                 ; ,,
-            bne loop            ; ,,
-            ldy #9              ; Draw Hab
-            jsr TextLine        ; ,,
-            lda #<DrawHab       ; ,,
-            ldy #>DrawHab       ; ,,
-            jsr PRTSTR          ; ,,
-            lda #<SCREEN+22     ; Draw east-going border
-            sta CURSOR          ; ,,
-            lda #>SCREEN+22     ; ,,
-            sta CURSOR+1        ; ,,
-            ldx #EAST
-            jsr DrawBorder
-            lda #<SCREEN+483    ; Draw west-going border
-            sta CURSOR          ; ,,
-            lda #>SCREEN+483    ; ,,
-            sta CURSOR+1        ; ,,
-            ldx #WEST
-            jsr DrawBorder
-            lda #$e4            ; Set the color for the Status Bar
-            sta CURSOR          ; ,,
-            lda #$97            ; ,,
-            sta CURSOR+1        ; ,,
-            ldy #$15            ; ,,
-            lda #$07            ; ,,
--loop:      sta (CURSOR),y      ; ,,
-            dey                 ; ,,
-            bpl loop            ; ,,
-            lda #" "            ; Make sure that the path to the ship
-            sta $1ee7           ;   isn't beset with geysers
-            sta $1ee8           ;   ,,
-            sta $1ee9           ;   ,,
-            lda #$00            ; Reset timer so the game always has the same
-            sta TIME_L          ;   starting conditions
-            lda #<ST_ENERGY+3   ; Initialize Energy to starting value +3
-            sta ENERGY          ;   The +3 is to compensate for the movement
-            lda #>ST_ENERGY+3   ;   used by the ship exiting the Hab
-            sta ENERGY+1        ;   ,,
-            lda LEVEL
-ch_harder:  cmp #$01            ; Harder= Subtract half the energy
-            bne ch_easier       ; ,,
-            lda #ST_ENERGY/2    ; ,,
-            jsr UseEnergy       ; ,,
-ch_easier:  cmp #$02            ; Easier= Add half the energy
-            bne place_ship      ; ,,
-            lda #ST_ENERGY/2    ; ,,
-            jsr AddEnergy       ; ,,
-place_ship: jsr NewShip         ; Place ship
-            jsr RSCursor        ; Clear the area around the ship of geysers
-            ldy #$00            ; ,,
--loop:      tya                 ; ,,
-            pha                 ; ,,
-            lda SearchPatt,y    ; ,,
-            tax                 ; ,,
-            jsr MoveCursor      ; ,,
-            lda #" "            ; ,,
-            ldy #$00            ; ,,
-            jsr DrawChar        ; ,,
-            pla                 ; ,,
-            tay                 ; ,,
-            iny                 ; ,,
-            cpy #$08            ; ,,
-            bne loop            ; ,,
-start_day:  lda #$01            ; Start at Day 1
-            sta DAY             ; ,,
-            lda #$80            ; Set game flag
-            sta GAME_FLAG       ; ,,
-            rts
-            
-DrawBorder: stx $07
-            ldy #$16
--loop:      tya
-            pha
-            lda #CH_BORDER
-            ldy #CO_BORDER
-            jsr DrawChar
-            lda #$02
-            jsr Delay
-            ldx $07
-            jsr MoveCursor
-            pla
-            tay
-            dey
-            bne loop 
-            rts           
-
-; Place  Pair       
-; Gamma geysers are place in pairs to try to get them evenly
-; distributed between the two pages of screen memory     
-NewGeyser:  tya
-            pha
-            lda #>SCREEN
-            sta CURSOR+1
-            jsr BASRND
-            lda RNDNUM
-            sta CURSOR
-            lda #CH_GEYSER
-            ldy #CO_GEYSER
-            jsr DrawChar
-            inc CURSOR+1
-            jsr BASRND
-            lda RNDNUM
-            sta CURSOR
-            lda #CH_GEYSER
-            ldy #CO_GEYSER
-            jsr DrawChar  
-            pla
-            tay
-            rts             
-
-; Set Level
-; Allow player to set starting energy, and return when Fire is pressed
-SetLevel:   ldy #16             ; Show the "LEVEL" text
-            jsr TextLine        ; ,,
-            lda #<LevelTx       ; ,,
-            ldy #>LevelTx       ; ,,
-            jsr PRTSTR          ; ,,
-            ldx LEVEL           ; Use the level value as an index to
-            lda LevelNameH,x    ;   find the level name pointer
-            tay                 ;   ,,
-            lda LevelNameL,x    ;   ,,
-            jsr PRTSTR          ; Display the level name
-            lda #<MusicTx       ; Show the "MUSIC" text
-            ldy #>MusicTx       ; ,,
-            jsr PRTSTR          ; ,,
-            ldx ENABLE_MUS      ; Use the music enable value as an
-            lda MusicH,x        ;   index to find the ON/OFF pointer
-            tay                 ;   ,,
-            lda MusicL,x        ;   ,,
-            jsr PRTSTR          ;   ,,
--loop:      jsr Joystick        ; Debounce the joystick
-            bne loop            ; ,,                        
-level_js:   jsr Joystick        ; Wait for joystick input
-            beq level_js        ; ,,
-            cmp #FIRE           ; If fire is pressed, continue to whatever
-            bne ch_west         ;   is next
-            rts                 ;   ,,
-ch_west:    cmp #WEST           ; If the joystick was moved west, decrease
-            bne ch_east         ;   the level
-            dec LEVEL           ;   ,,
-            bpl set_done        ;   ,,
-            lda #$02            ; If the level goes below 0, set it back
-            sta LEVEL           ;   to 2
-            bne set_done        ;   ,,
-ch_east:    cmp #EAST           ; If the joystick was moved east, increase
-            bne ch_north        ;   the level
-            inc LEVEL           ;   ,,
-            lda LEVEL           ; If the level goes above 2, set it back
-            cmp #$03            ;   to 0
-            bne set_done        ;   ,,
-            lda #$00            ;   ,,
-            sta LEVEL           ;   ,,
-            beq set_done
-ch_north:   cmp #NORTH          ; Joystick north enables music
-            bne ch_south
-            lda #$01
-            sta ENABLE_MUS
-            bne set_done
-ch_south:   lda #$00            ; South is the only direction left   
-            sta ENABLE_MUS      ;   so disable music          
-set_done:   lda #$04            ; Play a sound when the level changes
-            jsr Sound           ; ,,
-            jmp SetLevel
-            
+                
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; DATA
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-Intro:      .asc $0d,$0d,$0d,$1c,"     H",$1e,"ELIX",$1c,"C",$1e,"OLONY",$0d,$0d
-            .asc $1e,"     J",$1c,"ASON",$1e,"J",$1c,"USTIAN",$0d,$0d
-            .asc $1c,"     P",$1e,"RESS",$1c,"F",$1e,"IRE",$00
-
-; Hab Image
-DrawHab:    .asc "          "
-            .asc $1e,$5b,$11,$9d,$5c,$11,$9d,$9d,$5d," ",$5e,$00
+Intro:      .asc $0d,$0d,$0d,$0d,$0d,$0d,$05,"     S U B ",$21," M E D    "
+            .asc $0d,$0d,$0d,"  JASON JUSTIAN 2020",$0d,$0d,$0d
+            .asc "      PRESS FIRE",$00
 
 ; Manual Text            
-Manual:     .asc $93,$1e,"IT IS THE  YEAR 1999",$0d,$0d,$0d
-            .asc "EARTH  HAS ENTRUSTED",$0d,$0d
-            .asc "YOU TO ESTABLISH THE",$0d,$0d
-            .asc "HELIX COLONY  IN THE",$0d,$0d
-            .asc "PROCYON SYSTEM",$0d,$0d,$0d
-            .asc $9e,$21,$1c," EXPLORE",$1e," THE PLANET",$0d,$0d
-            .asc $9f,$25,$1c," BUILD",$1e,"  GAMMA MINES",$0d,$0d
-            .asc $1e,$2a,$1c," PROTECT",$1e,"  YOUR CREW",$0d,$0d,$0d
-            .asc "YOU HAVE  SIXTY DAYS",$0d,$0d,$0d
-            .asc "           ",$1c,"A",$1e,"GENT",$1c,"A",$1e,"NZU",$00
+Manual:     .asc $93,$05,"OUR UNDERSEA BASE IS",$0d,$0d
+            .asc "IN DANGER",$0d,$0d,$0d
+            .asc $21," PICK UP A MED PACK",$0d,$0d
+            .asc "  FROM THE LIGHTHOUSE",$0d,$0d
+            .asc $29," WITH YOUR SUB",$0d,$0d
+            .asc "@ DELIVER TO THE BASE",$0d,$0d
+            .asc $28," AVOID SEA LIFE ",$0d,$0d
+            .asc $3a," WATCH YOUR OXYGEN ",$0d,$0d,$0d
+            .asc "GOOD LUCK",$0d,$0d
+            .asc "            AGENT ANZU",$00
 
-; Score Bar            
-ScEnergy:   .asc $13,$1d,$9e,$3a,$1e," ",$00
-ScDay:      .asc $13,$1d,$1d,$1d,$1d,$1d,$1d,$1d
-            .asc $1d,$1d,$1d,$1d,$1d,$1d,$1d,$1d
-            .asc "DAY ",$00     
-
-; In-Game Text            
-GameOverTx: .asc $13,$11,$1d,$1d,$1d,$1d,$1d,$1d
-            .asc $1d,$1c,"G",$1e,"AME",$1c,"O",$1e
-            .asc "VER",$00   
+; Score Bar
+ScoreTx:    .asc $13,$05," SCORE ",$00
+HiTx:       .asc "HIGH ",$00
+GameOverTx: .asc $13,$11,$11,$1d,$1d,$1d,$1d,$1d,$1d
+            .asc $05," GAME OVER ",$00
             
-HiScoreTx:  .asc $1d,$1d,$1d,$1d,$1d,$1e,"H",$1c,"IGH"
-            .asc $1e,"S",$1c,"CORE",$1e,$00               
-    
-BuildTx:    .asc " ",$9e,$3a," 50 ",$1e,"MOVE TO BUILD "
-            .asc $9f,CH_BADMINE,$1e,$00  
-            
-; Set Level Text and Table            
-LevelTx:    .asc $05,"    K",$1e,"L",$1c,"EVEL",$00  
-NormalTx:   .asc $1e,"N",$1c,"ORMAL",$0d,$0d,$00
-HarderTx:   .asc $1e,"H",$1c,"ARDER",$0d,$0d,$00
-EasierTx:   .asc $1e,"E",$1c,"ASIER",$0d,$0d,$00
-LevelNameL: .byte <NormalTx,<HarderTx,<EasierTx
-LevelNameH: .byte >NormalTx,>HarderTx,>EasierTx
-
-; Enable Music Text and Table
-MusicTx:    .asc $05,"    Q",$1c,"M",$1e,"USIC",$00
-MusOnTx:    .asc $1c,"O",$1e,"FF",$00
-MusOffTx:   .asc $1c,"O",$1e,"N ",$00
-MusicL:     .byte <MusOnTx,<MusOffTx
-MusicH:     .byte >MusOnTx,>MusOffTx
-
 ; Direction Tables                       
 DirTable:   .byte 0,$ea,$01,$16,$ff
 JoyTable:   .byte 0,$04,$80,$08,$10,$20            ; Corresponding direction bit
-SearchPatt: .byte 1,2,3,3,4,4,1,1                  ; Sensor search pattern
-            
-; Player character movement sources
-PlSrcL:     .byte 0,<SHIP_NORTH,<SHIP_EAST,<SHIP_SOUTH,<SHIP_WEST 
-PlSrcH:     .byte 0,>SHIP_NORTH,>SHIP_EAST,>SHIP_SOUTH,>SHIP_WEST           
-            
-; Sound effects for the sound effects player
-; Each effect has three parameters
-;   (1) First byte is the starting shift register value
-;   (2) High nybble of second byte is the length in jiffies x 16
-;   (3) Low nybble of second byte is refresh rate in jiffies
-FXType:     .byte $11,$56                       ; Successful mine
-            .byte $2b,$51                       ; Failed Mine
-            .byte $55,$41                       ; Colonist killed
-            .byte $2f,$12                       ; Bonus Colonist
-            .byte $a3,$14                       ; Level Select
-            .byte $55,$11                       ; Not enough energy
-
-; Degree to Note Value
-; Determined with electronic tuner
-Oct0:       .byte 0,194,197,201,204,207,209,212,214,217,219,221,223,225
-            
-; Musical Theme for Game Play
-; wAxScore Format
-Theme:      ; I
-            .byte LEGATO_ON,$35,$18,$83,LEGATO_OFF,$40,$35,$18
-            .byte $28,$49,$80,$35,$18,$2d,$29,$28
-            .byte $29,$38,$16,$35,$18,$43,$40,$35
-            .byte $18,$28,$29,$40,$35,$18,$2d,$29
-            .byte $28,$29,$48,$40
-            
-            ; II
-            .byte LEGATO_ON,$1d,$1c,$1d,$18
-            .byte $15,$16,LEGATO_OFF,$28,LEGATO_ON,$1d,$1c,$1d,$18,$15
-            .byte $16,$15,$13,$11,$15,$18,$15,$19
-            .byte $1b,$18,$16,$15,$18,$1d,$18,$16
-            .byte $13,$25,$1d,$1c,$1d,$13,$15,$16,LEGATO_OFF
-            .byte $28,LEGATO_ON,$1d,$1c,$1d,$13,$15,$16,$15
-            .byte $13,$11,$15,$18,$15,$19,$1b,$18
-            .byte $16,$15,$18,$1d,$18,$16,$13,$25,LEGATO_OFF
-
-            ; II
-            .byte $35,$18,$83,$40,$35,$18
-            .byte $28,$49,$80,$35,$18,$2d,$29,$28
-            .byte $29,$38,$16,$35,$18,$43,$40,$35
-            .byte $18,$28,$29,$40,$35,$18,$2d,$29
-            .byte $28,$29,$48,$40
-
-            ; III
-            .byte LEGATO_ON,$1d,$1c,$1d,$18,$1b,$16,$19,$18
-            .byte LEGATO_OFF,$1d,LEGATO_ON,$1c,$1d,$18,$1b,$16,$19,$18
-            .byte LEGATO_OFF,$15,LEGATO_ON,$16,$18,$1d,$13,$15,$16
-            .byte LEGATO_OFF,$1d,LEGATO_ON,$16,$13,$15,$18,$41,LEGATO_OFF
-            .byte $1d,$1c,$1d,$18,$1b,$16,$19,$18
-            .byte $1d,$1c,$1d,$18,$1b,$16,$19,$18
-            .byte $15,$16,$18,$1d,$13,$15,$16
-            .byte $1d,$16,$13,$15,LEGATO_ON,$18,$41,LEGATO_OFF
-            
-            .byte $00 ; End of Score
-            
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-; VARIABLES
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-; Game Data
-HISCORE:    .byte $00,$00       ; High Score
-ENERGY:     .byte $00,$00       ; Energy (a.k.a Score)
-DIR:        .byte $00           ; Direction
-UNDER:      .byte $00           ; Character under player
-UNDER_COL:  .byte $00           ; Color under player
-SENSOR_CT:  .byte $00           ; Local sensor count
-COL_CT:     .byte $00           ; Colonist count
-DAY:        .byte $00           ; Day number
-MINE_CT:    .byte $00           ; Successful mine count
-LEVEL:      .byte $00           ; Level (0=normal, 1=harder, 2=easier)
-SCRPAD:     .byte $00           ; Temporary scratchpad
-JOYREG:     .byte $00           ; Joystick register
-BUILD_FLAG: .byte $00           ; Bit 7 set if in build mode
-SCORE_FLAG: .byte $00           ; Bit 7 set when score has changed
-GAME_FLAG:  .byte $00           ; Bit 7 set when the game is running
-
-; Music Player Memory                 
-TEMPO:      .byte $05           ; Tempo (jiffies per eighth note)
-COUNTDOWN:  .byte $00           ; Tempo countdown
-PLAY_FLAG:  .byte $00           ; Play flag if bit 7 is set
-LEGATO:     .byte $00           ; Legato if bit 7 is set
-ENABLE_MUS  .byte $01           ; Music player is enabled if 1
-
-; Sound Effects Player Memory
-REG_FX      .byte $00           ; Sound effects register
-FXLEN       .byte $00           ; Sound effects length
-FXCD        .byte $00           ; Sound effects countdown
-FXCDRS      .byte $00           ; Countdown reset value
-
-; Padding to 3583 bytes
-Padding:    .asc "2020 JASON JUSTIAN",$0d
-            .asc "JJUSTIAN@GMAIL.COM",$0d
-            .asc "BEIGEMAZE.COM/VICLAB",$0d
-            .asc "RELEASED UNDER CREATIVE COMMONS",$0d
-            .asc "ATTRIBUTION-NONCOMMERCIAL 4.0",$0d
-            .asc "INTERNATIONAL PUBLIC LICENSE",$0d
-            .asc "----------",$00
-            .asc "ALL WORK AND NO PLAY MAKES JACK A DULL BOY",$00
-
+         
+; Level Advancement Table           
+LevelPos:   .byte $01,$01,$02,$04,$06,$09,$0d,$10,$14           
+           
+Pad3583:    .asc "123456789012345678901234567890123456789012345678901234567890"  
+            .asc "123456789012345678901234567890123456789012345678901234567890"
+            .asc "123456789012345678901234567890123456789012345678901234567890"
+            .asc "123456789012345678901234567890123456789012345678901234567890"
+            .asc "123456789012345678901234567890123456789012345678901234567890"
+            .asc "123456789012345678901234567890123456789012345678901234567890"
+            .asc "123456789012345678901234567890123456789012345678901234567890"
+            .asc "123456789012345678901234567890123456789012345678901234567890"
+            .asc "123456789012345678901234567890123456789012345678901234567890"
+            .asc "123456789012345678901234567890123456789012345678901234567890"
+            .asc "123456789012345678901234567890123456789012345678901234567890"
+            .asc "123456789012345678901234567890123456789012345678901234567890"
+            .asc "123456789012345678901234567890123456789012345678901234567890"
+            .asc "123456789012345678901234567890123456789012345678901234567890"
+            .asc "123456789012345678901234567890123456789012345678901234567890"
+            .asc "123456789012345678901234567890123456789012345678901234567890"
+            .asc "123456789012345678901234567890123456789012345678901234567890"
+            .asc "123456789012345678901234567890123456789012345678901234567890"
+            .asc "123456789012345678901234567890123456789012345678901234567890"
+            .asc "123456789012345678901234567890123456789012345678901234567890"
+            .asc "123456789012345678901234567890123456789012345678901234567890"
+            .asc "123456789012345678901234"
+                       
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; CUSTOM CHARACTER SET
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1349,70 +924,67 @@ Padding:    .asc "2020 JASON JUSTIAN",$0d
 ; a reliable method as long as you don't add anything AFTER this
 ; character data.
 ;                       
-CharSet:    .byte $c0,$03,$3c,$03,$c0,$3c,$c0,$03  ; Ship explosion (multicolor)
-            .byte $10,$28,$28,$44,$44,$80,$82,$00  ; A
-            .byte $f8,$04,$04,$f8,$84,$84,$f8,$00  ; B
-            .byte $30,$44,$80,$80,$80,$44,$38,$00  ; C
-            .byte $f0,$88,$84,$84,$04,$08,$f0,$00  ; D
-            .byte $fc,$00,$00,$fc,$00,$00,$fc,$00  ; E
-            .byte $fc,$00,$00,$fc,$80,$80,$80,$00  ; F
-            .byte $38,$40,$80,$94,$84,$44,$38,$00  ; G
-            .byte $84,$84,$84,$b4,$84,$84,$84,$00  ; H
-            .byte $10,$10,$10,$10,$10,$10,$10,$00  ; I
-            .byte $04,$00,$04,$04,$84,$84,$78,$00  ; J
-;           .byte $84,$88,$90,$a0,$90,$88,$84,$00  ; K
-            .byte $00,$00,$00,$28,$6c,$28,$00,$00  ; Left/Right (for K)
-            .byte $80,$80,$80,$80,$80,$40,$3c,$00  ; L
-            .byte $82,$c4,$a8,$90,$80,$80,$80,$00  ; M
-            .byte $84,$c4,$a4,$94,$8c,$04,$84,$00  ; N
-            .byte $30,$08,$84,$84,$84,$48,$30,$00  ; O
-            .byte $b8,$04,$04,$f8,$80,$80,$80,$00  ; P
-;           .byte $18,$04,$02,$82,$92,$54,$38,$10  ; Q
-            .byte $00,$00,$10,$38,$00,$38,$10,$00  ; Up/Down (for Q)
-            .byte $f8,$04,$04,$f8,$80,$88,$84,$00  ; R
-            .byte $70,$84,$80,$78,$04,$84,$78,$00  ; S
-            .byte $f2,$10,$10,$10,$10,$10,$10,$00  ; T
-            .byte $84,$04,$84,$84,$84,$84,$78,$00  ; U
-            .byte $82,$80,$44,$44,$28,$28,$10,$00  ; V
-            .byte $80,$80,$80,$90,$a8,$c4,$82,$00  ; W
-            .byte $82,$40,$20,$10,$28,$44,$82,$00  ; X
-            .byte $82,$40,$20,$10,$10,$10,$10,$00  ; Y
-            .byte $be,$04,$08,$10,$20,$40,$fe,$00  ; Z
-            .byte $3c,$7e,$df,$ef,$ff,$7e,$3c,$10  ; Hab North
-            .byte $10,$18,$18,$18,$3c,$66,$c3,$81  ; Hab Connector
-            .byte $07,$3c,$7e,$df,$ef,$ff,$7e,$3c  ; Hab Southwest
-            .byte $e0,$3c,$7e,$df,$ef,$ff,$7e,$3c  ; Hab Southeast
-            .byte $00,$00,$00,$99,$99,$00,$00,$00  ; Border
-            .byte $00,$00,$00,$00,$00,$00,$00,$00  ; Space
-            .byte $00,$18,$24,$24,$ff,$7e,$18,$00  ; ! Player's Ship ($21)
-BITMAP_S:   .byte $00,$00,$00,$00,$00,$00,$00,$00  ; " Bitmap Source ($22)
-BITMAP_D:   .byte $00,$00,$00,$00,$00,$00,$00,$00  ; # Bitmap Destination ($23)
-            .byte $00,$00,$00,$7e,$3c,$3c,$7e,$ff  ; Failed Mine
-            .byte $52,$24,$00,$7e,$3c,$3c,$7e,$ff  ; Successful Mine
-            .byte $00,$00,$00,$00,$00,$00,$10,$10  ; Signal 1
-            .byte $00,$00,$00,$00,$08,$08,$28,$28  ; Signal 2
-            .byte $00,$00,$04,$04,$14,$14,$54,$54  ; Signal 3
-            .byte $02,$02,$0a,$0a,$2a,$2a,$aa,$aa  ; Signal 4
-            .byte $38,$00,$38,$54,$10,$10,$28,$44  ; Colonist Symbol
-            .byte $0c,$30,$00,$0c,$30,$00,$28,$aa  ; Gamma geyser
-            .byte $00,$18,$24,$24,$ff,$7e,$24,$42  ; , Landed player ship
-SHIP_WEST:  .byte $08,$14,$24,$2f,$7e,$f8,$10,$00  ; Ship moving west 
-SHIP_EAST:  .byte $10,$28,$24,$f6,$7f,$1c,$08,$00  ; Ship moving east
-SHIP_SOUTH: .byte $00,$18,$24,$e7,$7e,$18,$00,$00  ; Ship moving south
-            .byte $30,$48,$84,$84,$80,$40,$30,$00  ; 0
-            .byte $30,$10,$10,$10,$10,$10,$10,$00  ; 1
-            .byte $38,$44,$04,$08,$10,$20,$64,$00  ; 2
-            .byte $fc,$00,$00,$18,$04,$84,$78,$00  ; 3
-            .byte $14,$24,$44,$fc,$00,$00,$04,$00  ; 4
-            .byte $f4,$80,$80,$78,$04,$84,$78,$00  ; 5
-            .byte $74,$80,$80,$b8,$84,$84,$78,$00  ; 6
-            .byte $be,$04,$08,$10,$20,$40,$80,$00  ; 7
-            .byte $78,$04,$84,$78,$84,$80,$78,$00  ; 8
-            .byte $78,$84,$84,$74,$04,$00,$04,$00  ; 9
-            .byte $00,$30,$08,$04,$3e,$10,$08,$06  ; Energy Symbol
-            .byte $00,$00,$00,$00,$00,$00,$f0,$f0  ; Large Signal 1
-            .byte $00,$00,$00,$00,$f0,$f0,$f0,$f0  ; Large Signal 2
-            .byte $00,$00,$f0,$f0,$f0,$f0,$f0,$f0  ; Large Signal 3
-            .byte $f0,$f0,$f0,$f0,$f0,$f0,$f0,$f0  ; Large Signal 4
-SHIP_NORTH: .byte $00,$18,$24,$ff,$7e,$18,$00,$00  ; Ship moving north
-            
+CharSet:    .byte $3c,$42,$5a,$5a,$42,$3c,$c3,$81 ; Sea Base
+            .byte $00,$38,$44,$4c,$54,$64,$44,$44 ; A
+            .byte $00,$78,$44,$44,$48,$54,$64,$78 ; B
+            .byte $00,$38,$44,$40,$40,$44,$4c,$38 ; C
+            .byte $00,$70,$48,$44,$44,$44,$48,$70 ; D
+            .byte $00,$7c,$40,$40,$70,$40,$40,$7c ; E
+            .byte $00,$7c,$40,$40,$70,$40,$40,$40 ; F
+            .byte $00,$38,$44,$40,$44,$5c,$44,$38 ; G
+            .byte $00,$44,$44,$44,$4c,$74,$44,$44 ; H
+            .byte $00,$40,$40,$40,$40,$40,$40,$40 ; I
+            .byte $00,$04,$04,$04,$04,$04,$44,$38 ; J
+            .byte $00,$44,$44,$44,$48,$54,$64,$44 ; K
+            .byte $00,$40,$40,$40,$40,$40,$40,$7c ; L
+            .byte $00,$36,$49,$49,$49,$49,$49,$49 ; M
+            .byte $00,$44,$64,$54,$4c,$44,$44,$44 ; N
+            .byte $00,$38,$44,$44,$44,$44,$44,$38 ; O
+            .byte $00,$78,$44,$44,$58,$60,$40,$40 ; P
+            .byte $00,$38,$44,$44,$54,$4c,$44,$3a ; Q
+            .byte $00,$78,$44,$44,$58,$70,$48,$44 ; R
+            .byte $00,$38,$44,$60,$38,$0c,$44,$38 ; S
+            .byte $00,$7c,$10,$10,$10,$10,$10,$10 ; T
+            .byte $00,$44,$44,$44,$44,$44,$44,$38 ; U
+            .byte $00,$44,$44,$44,$44,$24,$14,$0c ; V
+            .byte $00,$49,$49,$49,$49,$49,$49,$36 ; W
+            .byte $00,$44,$44,$44,$38,$44,$44,$44 ; X
+            .byte $00,$44,$44,$44,$44,$38,$10,$10 ; Y
+            .byte $00,$7c,$04,$08,$10,$20,$40,$7c ; Z
+            .byte $55,$65,$65,$a9,$a9,$65,$65,$55 ; Med pack
+            .byte $3c,$42,$5a,$5a,$42,$3c,$c3,$81 ; <unused>
+            .byte $3c,$42,$5a,$5a,$42,$3c,$c3,$81 ; <unused>
+            .byte $3c,$42,$5a,$5a,$42,$3c,$c3,$81 ; <unused>
+            .byte $55,$65,$65,$a9,$a9,$65,$65,$55 ; <unused>
+            .byte $00,$00,$00,$00,$00,$00,$00,$00 ; Space
+            .byte $00,$18,$18,$7e,$7e,$18,$18,$00 ; Med Pack (single color)
+            .byte $3c,$42,$5a,$5a,$42,$3c,$c3,$81 ; <unused>
+            .byte $e7,$bd,$81,$e7,$e7,$db,$db,$c3 ; Lighthouse Upper
+            .byte $c3,$bd,$bd,$81,$81,$bd,$a5,$a5 ; Lighthouse Lower
+            .byte $ff,$ff,$ff,$ff,$ff,$ff,$ff,$ff ; Sea floor (multi)
+            .byte $3c,$3c,$ff,$ff,$ff,$ff,$ff,$ff ; Sea floor top (multi)
+            .byte $00,$00,$0d,$1e,$0d,$00,$00,$00 ; Fish 1
+            .byte $00,$00,$68,$f0,$68,$00,$00,$00 ; Fish 2
+PL_LEFT:    .byte $18,$19,$7f,$d7,$fe,$78,$00,$00 ; Player left
+            .byte $18,$1a,$3e,$6e,$7c,$38,$00,$00 ; Player turning left
+            .byte $18,$18,$3c,$3c,$7e,$3c,$00,$00 ; Player facing
+            .byte $18,$58,$7c,$76,$3e,$1c,$00,$00 ; Player turning right
+PL_RIGHT:   .byte $18,$98,$fe,$eb,$7f,$1e,$00,$00 ; Player right
+BITMAP_S:   .byte $00,$00,$00,$00,$00,$00,$00,$00 ; Bitmap Source
+BITMAP_D:   .byte $00,$00,$00,$00,$00,$00,$00,$00 ; Bitmap Destination
+            .byte $00,$38,$44,$44,$44,$44,$44,$38 ; 0
+            .byte $00,$04,$0c,$04,$04,$04,$04,$04 ; 1
+            .byte $00,$38,$44,$04,$08,$10,$20,$7c ; 2
+            .byte $00,$38,$44,$04,$38,$04,$44,$38 ; 3
+            .byte $00,$04,$0c,$14,$24,$7c,$04,$04 ; 4
+            .byte $00,$7c,$40,$60,$18,$04,$04,$78 ; 5
+            .byte $00,$38,$44,$60,$58,$44,$44,$38 ; 6
+            .byte $00,$7c,$04,$04,$04,$04,$04,$04 ; 7
+            .byte $00,$38,$44,$38,$44,$44,$44,$38 ; 8
+            .byte $00,$38,$44,$44,$3c,$04,$44,$38 ; 9            
+            .byte $06,$f2,$96,$94,$96,$90,$f0,$00 ; O2 Indicator
+            .byte $00,$00,$00,$ff,$ff,$00,$00,$00 ; Oxygen level 4
+            .byte $00,$00,$00,$fc,$fc,$00,$00,$00 ; Oxygen level 3
+            .byte $00,$00,$00,$f0,$f0,$00,$00,$00 ; Oxygen level 2
+            .byte $00,$00,$00,$c0,$c0,$00,$00,$00 ; Oxygen level 1
+            .byte $00,$00,$00,$00,$00,$00,$00,$00 ; Oxygen level 0            
