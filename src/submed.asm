@@ -647,7 +647,7 @@ Turn:       sta TRAVEL          ; Switch the direction of travel
 next_turn:  lda SUBCHAR         ; Start turn with the current character
             ldy #CO_PLAYER      ; ,,
             jsr DrawChar        ; ,,
-            lda #04             ; Delay so the turn can be seen
+            lda SUBSPEED        ; Delay so the turn can be seen
             jsr Delay           ; ,,
             lda TRAVEL          ; Check the new directon of travel
             cmp #LEFT           ; If the new direction is left, then decrement
@@ -1180,7 +1180,7 @@ Padding:    .asc "2020 JASON JUSTIAN",$0d
             .asc "RELEASED UNDER CREATIVE COMMONS",$0d
             .asc "ATTRIBUTION-NONCOMMERCIAL 4.0",$0d
             .asc "INTERNATIONAL PUBLIC LICENSE",$0d
-            .asc "--------------------------------------------",$00
+            .asc "-------------------------------------------",$00
             .asc "ALL WORK AND NO PLAY MAKES JACK A DULL BOY",$00
             .asc "ALL WORK AND NO PLAY MAKES JACK A DULL BOY",$00
             .asc "ALL WORK AND NO PLAY MAKES JACK A DULL BOY",$00
