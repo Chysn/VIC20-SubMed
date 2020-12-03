@@ -806,17 +806,7 @@ pick_left:  lda #<PL_LEFT
             lda #>PL_LEFT
             sta CURSOR+1
             rts            
-            
-; Postion Text
-; To line in Y            
-TextLine:   lda #$13            ; Home cursor
-            jsr CHROUT
-            lda #$11            ; Cursor down
--loop:      jsr CHROUT
-            dey
-            bne loop
-            rts 
-                        
+                                    
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; SETUP ROUTINES
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1192,7 +1182,7 @@ Padding:    .asc "2020 JASON JUSTIAN",$0d
             .asc "RELEASED UNDER CREATIVE COMMONS",$0d
             .asc "ATTRIBUTION-NONCOMMERCIAL 4.0",$0d
             .asc "INTERNATIONAL PUBLIC LICENSE",$0d
-            .asc "------------------------------",$00
+            .asc "--------------------------------------------",$00
             .asc "ALL WORK AND NO PLAY MAKES JACK A DULL BOY",$00
             .asc "ALL WORK AND NO PLAY MAKES JACK A DULL BOY",$00
             .asc "ALL WORK AND NO PLAY MAKES JACK A DULL BOY",$00
