@@ -542,7 +542,9 @@ not_turn:   sta DIR             ; Set the direction
             jmp TouchBase       ; ,,
 is_clear:   cmp #$20            ; If there's a non-space, do not move
             beq do_move         ; ,,
-            rts                 ; ,,
+            lda #PL_SPEED       ; If an obstacle has been struck (fish, land)
+            sta SUBSPEED        ;   reduce speed
+            rts
 do_move:    lda #CHAR_D         ; Draw the bitmap destination character at the
             ldy #CO_PLAYER      ;   destination location with player color
             jsr DrawChar        ;   ,,
@@ -902,7 +904,8 @@ Manual:     .asc $93,$05,"OUR UNDERSEA BASE IS",$0d,$0d
 ; Score Bar
 ScoreTx:    .asc $13,$05," SCORE ",$00
 HiTx:       .asc "HIGH ",$00
-GameOverTx: .asc $13,$11,$11,$1d,$1d,$1d,$1d,$1d,$1d
+GameOverTx: .asc $13,$11,$11,$11,$11,$11,$11,$11,$11
+            .asc $1d,$1d,$1d,$1d,$1d,$1d
             .asc $05," GAME OVER ",$00
             
 ; Direction Tables                       
@@ -932,7 +935,7 @@ Pad3583:    .asc "123456789012345678901234567890123456789012345678901234567890"
             .asc "123456789012345678901234567890123456789012345678901234567890"
             .asc "123456789012345678901234567890123456789012345678901234567890"
             .asc "123456789012345678901234567890123456789012345678901234567890"
-            .asc "1234567890123456789012345678901234567890123456"
+            .asc "12345678901234567890123456789012345"
                        
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; CUSTOM CHARACTER SET
