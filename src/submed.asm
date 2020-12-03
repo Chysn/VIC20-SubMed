@@ -59,10 +59,15 @@ FISH        = $27               ; School of fish
 CO_FISH     = $05               ; Fish color
 O2_CHAR     = $3a               ; Oxygen icon
 
+; wAxScore Constants
+NO_EFFECT   = $0f
+LEGATO_ON   = $3f
+LEGATO_OFF  = $4f
+
 ; System Resources
 CINV        = $0314             ; ISR vector
-;NMINV       = $0318             ; Release NMI vector
-NMINV       = $fffe             ; Development NMI non-vector
+NMINV       = $0318             ; Release NMI vector
+;NMINV       = $fffe             ; Development NMI non-vector
 SCREEN      = $1e00             ; Screen character memory (unexpanded)
 COLOR       = $9600             ; Screen color memory (unexpanded)
 IRQ         = $eabf             ; System ISR   
@@ -72,6 +77,7 @@ VICCR5      = $9005             ; Character map register
 VOICEH      = $900c             ; High sound register
 VOICEM      = $900b             ; Mid sound register
 VOICEL      = $900a             ; Low sound register
+FX_VOICE    = $900c             ; Sound effects voice
 NOISE       = $900d             ; Noise register
 VOLUME      = $900e             ; Sound volume register/aux color
 BACKGD      = $900f             ; Background color
@@ -89,7 +95,8 @@ CHROUT      = $ffd2             ; Output one character
 TIME_L      = $a2               ; Jiffy counter low
 TIME_M      = $a1               ; Jiffy counter middle  
 
-; Game Memory - Zeropage Pointers
+; Game Memory
+CUR_NOTE    = $03               ; Current wAxScore note
 CURSOR      = $f9               ; Cursor (2 bytes)
 PLAYER      = $fb               ; Player location (2 bytes)
 BASE_COL    = $fd               ; Base color pointer (2 bytes)
@@ -110,14 +117,23 @@ JOYREG:     .byte $00           ; Joystick register
 SUBSPEED:   .byte $00           ; Sub speed (lower is faster)
 SEALIFE_CD: .byte $00           ; Sealife movement countdown
 OXYGEN:     .byte $00           ; Oxygen
-SHOWSCORE   .byte $00           ; Score Bar show flag
-O2_CD       .byte $00           ; Oxygen depletion countdown
+SHOWSCORE:  .byte $00           ; Score Bar show flag
+O2_CD:      .byte $00           ; Oxygen depletion countdown
+PLAY_FL:    .byte $00           ; Play flag - bit 7 when game is going on
+
+; Music Player Memory                 
+TEMPO:      .byte $04           ; Tempo (jiffies per eighth note)
+COUNTDOWN:  .byte $00           ; Tempo countdown
+PLAY_FLAG:  .byte $00           ; Play flag if bit 7 is set
+LEGATO:     .byte $00           ; Legato if bit 7 is set
+ENABLE_MUS  .byte $01           ; Music player is enabled if 1
 
 ; Sound Effects Player Memory
-REG_FX      .byte $00           ; Sound effects register
-FXLEN       .byte $00           ; Sound effects length
-FXCD        .byte $00           ; Sound effects countdown
-FXCDRS      .byte $00           ; Countdown reset value
+FX_REG      .byte $00           ; Current effect frequency register
+FX_LEN:     .byte $00           ; Effect length for current effect
+FX_COUNT:   .byte $00           ; Effect countdown for current effect
+FX_DIR:     .byte $00           ; Effect direction ($00 if left, $80 is right)
+FX_SPEED:   .byte $00           ; Effect countdown reset value
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; MAIN PROGRAM
@@ -129,7 +145,12 @@ Startup:    jsr SetupHW         ; Set up hardware
            
 ; Welcome Screen
 ; Show intro, set level, then show manual page      
-Welcome:    lda #$00            ; Shut off all sounds
+Welcome:    clc                 ; Disable the playing flag, in case we get
+            ror PLAY_FL         ;   here from the NMI
+            lda #110            ; Set background color
+            sta BACKGD          ; ,,
+            jsr wsStop          ; Stop wAxScore player
+            lda #$00            ; Shut off all sounds
             sta VOICEL          ; ,,
             sta VOICEM          ; ,,
             sta VOICEH          ; ,,
@@ -138,7 +159,29 @@ Welcome:    lda #$00            ; Shut off all sounds
             lda #<Intro         ; Show Intro
             ldy #>Intro         ; ,,
             jsr PRTSTR          ; ,,
-            jsr Wait4Fire       ; Wait for fire button
+            lda #120
+            sta CURSOR
+            lda #$1e
+            sta CURSOR+1
+            lda #$1c
+            ldy #$07
+            jsr DrawChar
+            ldx #RIGHT
+            jsr MoveCursor
+            lda #$1d
+            ldy #$07
+            jsr DrawChar
+            ldx #DOWN
+            jsr MoveCursor
+            lda #$1e
+            ldy #$07
+            jsr DrawChar
+            ldx #LEFT
+            jsr MoveCursor
+            lda #$1f
+            ldy #$07
+            jsr DrawChar
+            jsr Wait4Fire
             lda #<Manual        ; Show the game manual
             ldy #>Manual        ; ,,
             jsr PRTSTR          ; ,,
@@ -164,13 +207,21 @@ control:    jsr Joystick        ; Read the joystick
             bne Main            ; Check the joystick again
 ch_fire:    cmp #FIRE           ; Has fire been pressed?
             bne handle_dir      ; If not, handle a direction
-            jmp Ping            ; Ping on fire
-handle_dir: jsr Move
+            jsr wsToggle        ; Toggle music on fire
+debounce:   jsr Joystick        ; Debounce fire button:
+            cmp #FIRE           ;   Check joystick for fire button release
+            beq debounce        ;   before returning to Main
+            jmp Main            ;   ,,
+handle_dir: jsr Move            ; Move the sub
             jsr CheckMed        ; Are we on the med pack?
             jmp Main
             
  ; Custom ISR for music player and day counting
-ISR:        dec SEALIFE_CD
+ISR:        bit PLAY_FL         ; If the game is over, don't do anything
+            bpl isr_r           ;   in this routine
+            jsr FXService       ; Service sound effect
+            jsr wsService       ; Service music
+            dec SEALIFE_CD
             bne o2_deplete
             lda SEALIFE_GEN     ; Reset countdown timer
             sta SEALIFE_CD      ; ,,
@@ -205,8 +256,6 @@ isr_r:      jmp IRQ
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; GAME MECHANICS ROUTINES
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;                        
-Ping:       jmp Main
-
 CheckMed:   bit HAVEMED         ; If the med pack is already picked up,
             bmi check_r         ;   no need to check it
             lda CURSOR+1
@@ -217,6 +266,8 @@ CheckMed:   bit HAVEMED         ; If the med pack is already picked up,
             bne check_r
             ror HAVEMED         ; Set med pack flag
             jsr ClrMedPack      ; Clear the med pack icon
+            lda #$00            ; Play sound effect for med pack pickup
+            jsr FXLaunch        ; ,,
             lda OXYGEN          ; Add some oxygen as a bonus
             clc                 ;   ,,
             adc #O2_ADD         ;   ,,
@@ -262,8 +313,9 @@ DrawMed:    tax                 ; Save A in X while we mess with A
 ; Touch Base
 ; The base has been encountered, so determine what to do
 TouchBase:  bit HAVEMED         ; Does the player have the med pack?
-            bmi have_med        ; If not, do nothing
-            rts                 ; ,,
+            bmi have_med        ; If not, play the "missing med pack"
+            lda #$04            ;   sound  
+            jmp FXLaunch        ;   ,,
 have_med:   clc                 ; Clear the med pack flag
             ror HAVEMED         ; ,,
             jsr SetMedPack      ; Show the med pack at the lighthouse
@@ -271,7 +323,10 @@ have_med:   clc                 ; Clear the med pack flag
             clc                 ; And add remaining oxygen as a bonus
             adc OXYGEN          ; ,,
             jsr ScoreBar        ; ,,
-            jmp LevelUp         ; Move the base and advance the level
+            jsr LevelUp         ; Move the base and advance the level
+            lda #$01            ; Launch sound effect for delivery
+            jmp FXLaunch        ; ,,
+
             
 ; Level Up
 ; Move Sea Base to next level            
@@ -316,8 +371,9 @@ draw_base:  lda CURSOR
             sta BASE_COL+1
             lda #SEABASE
             ldy #$01
+            jsr DrawChar
             cli
-            jmp DrawChar
+            rts
             
 ; Swim
 ; Move each fish to the left                   
@@ -434,7 +490,8 @@ Delay:      clc
 ; Score
 ; Add score in Accumulator (positive or negative), then show
 ; score bar
-ScoreBar:   clc
+ScoreBar:   sei                 ; Stop interrupt during score bar display
+            clc
             adc SCORE
             sta SCORE
             lda #$00
@@ -461,7 +518,9 @@ show_score: jsr ShowScore
             bcs o2_bar          ;   oxygen bar red
             lda #$9c            ;   ,,
             jsr CHROUT          ;   ,,
-            lda $02             ;   ,,
+            lda #$03            ; Emit warning sound when O2 is low
+            jsr FXLaunch        ; ,,
+            lda $02             ; Restore the oxygen temp register
 o2_bar:     cmp #$04
             bcc finish          ; If oxygen is under 4, then wrap it up
             lda #O2_CHAR+1
@@ -475,9 +534,11 @@ finish:     lda #$3f
             sec
             sbc $02
             jsr CHROUT          ; Add the end of the oxygen meter
+            cli                 ; Restart interrupt
             rts
             
-GameOver:   jsr ShowScore
+GameOver:   jsr wsStop          ; Stop the music
+            jsr ShowScore
             lda #<HiTx
             ldy #>HiTx
             jsr PRTSTR
@@ -487,7 +548,7 @@ GameOver:   jsr ShowScore
             lda #<GameOverTx
             ldy #>GameOverTx
             jsr PRTSTR
-            lda #$00
+            lda #$08
             sta VOLUME
             jsr RSCursor
             jsr GetChar
@@ -496,7 +557,12 @@ GameOver:   jsr ShowScore
             lda #$00
             ldx #$00
             sta (BASE_COL,x)    ; Set base color to black
-            sei
+            lda #$02
+            jsr FXLaunch
+            lda #$40
+            jsr Delay
+            clc                 ; Clear the game playing flag
+            ror PLAY_FL         ; ,,
             jmp Start
             
 ; Show Score
@@ -550,12 +616,12 @@ do_move:    lda #CHAR_D         ; Draw the bitmap destination character at the
             jsr DrawChar        ;   ,,
             ldx #$08            ; Move the character 8 pixels in the selected
 -loop:      jsr MoveBitmap      ;   direction, with a short delay between each
-            lda #$90            ;   pixel. The engine sound is a pulse
-            sta VOICEM          ;   followed by silence.
+            lda #$c0            ;   pixel. The engine sound is a pulse
+            sta VOICEL          ;   followed by silence.
             lda #01             ;   ,,
             jsr Delay           ;   ,,
             lda #$00            ;   ,,
-            sta VOICEM          ;   ,,
+            sta VOICEL          ;   ,,
             lda SUBSPEED        ;   ,,
             jsr Delay           ;   ,,
             dex                 ;   ,,
@@ -757,8 +823,6 @@ TextLine:   lda #$13            ; Home cursor
 ; Setup Hardware
 SetupHW:    lda TIME_L          ; Seed random number generator
             sta RNDNUM          ; ,,
-            lda #110            ; Set background color
-            sta BACKGD          ; ,,
             lda #$ff            ; Set custom character location
             sta VICCR5          ; ,,
             lda #$00            ; Initialize sound registers
@@ -776,19 +840,25 @@ SetupHW:    lda TIME_L          ; Seed random number generator
             sta NMINV           ; ,, 
             lda #>Welcome       ; ,,
             sta NMINV+1         ; ,,
+            sei                 ; Install the custom ISR
+            lda #<ISR           ; ,,
+            sta CINV            ; ,,
+            lda #>ISR           ; ,,
+            sta CINV+1          ; ,,
+            cli                 ; ,,
             rts
             
 ; Initialize Game
 InitGame:   lda #SCRCOM         ; Set background color
             sta BACKGD          ; ,,
             jsr CLSR            ; Clear Screen
-            lda #$8f            ; Set volume and aux color
+            lda #$88            ; Set volume and aux color
             sta VOLUME          ; ,,
             lda #$00            ; Initialize score and level
             sta SCORE           ; ,,
             sta SCORE+1         ; ,,
             sta LEVEL           ; ,,
-            sta SHOWSCORE       ; ,,
+            sta SHOWSCORE       ; Clear show score flag
             sta HAVEMED         ; Clear med pack flag
             lda #O2_START       ; Initialize oxygen
             sta OXYGEN          ; ,,
@@ -874,31 +944,181 @@ next_reef:  lda #LANDCHAR       ; ,,
             sta SEALIFE_CD      ; ,,
             lda #O2_RATE        ; Set oxygen depletion countdown
             sta O2_CD           ; ,,
-            sei                 ; Install the custom ISR
-            lda #<ISR           ; ,,
-            sta CINV            ; ,,
-            lda #>ISR           ; ,,
-            sta CINV+1          ; ,,
-            cli                 ; ,,
+            jsr wsReset         ; Reset the music score
+            jsr wsPlay          ; Start the music
+            sec                 ; Set the game playing flag
+            ror PLAY_FL         ; ,,
+            cli                 ; Start the interrupt
+            rts
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; WAXSCORE IRQ PLAYER
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; Reset Score to Start
+wsReset:    lda #<Theme
+            sta CUR_NOTE
+            lda #>Theme
+            sta CUR_NOTE+1
+            lda #$00
+            sta COUNTDOWN
+            sta LEGATO
+            rts
+
+; Begin Playing
+wsPlay:     lda ENABLE_MUS
+            beq play_r
+            sec
+            ror PLAY_FLAG
+play_r:     rts
+            
+; Stop Playing
+wsStop:     clc
+            ror PLAY_FLAG
+            sta VOICEM
+            rts
+
+; Toggle Play
+wsToggle:   bit PLAY_FLAG
+            bmi wsStop
+            bpl wsPlay
+            
+; Service Routine           
+wsService:  bit PLAY_FLAG
+            bpl svc_r
+            lda COUNTDOWN
+            beq fetch_note
+            cmp #$03            ; Handle legato playing by stopping
+            bcs keep_on         ;   a non-legato note with a few
+            bit LEGATO          ;   jiffies before the end of the
+            bmi keep_on         ;   duration. Legato notes are kept on
+            lda #$00
+            sta VOICEM
+keep_on:    dec COUNTDOWN
+            lda VOLUME
+            and #$0f
+            cmp #$08
+            beq svc_r
+            inc VOLUME
+            rts
+fetch_note: ldx #$00
+            stx COUNTDOWN       ; Initialize countdown
+            lda (CUR_NOTE,x)
+            beq eos             ; End of score
+            tay                 ; Y holds the full note data
+            and #$0f            ; Mask away the duration
+            cmp #$0f            ; Is this a effect?
+            beq wsEffect
+            tax
+            lda Oct0,x
+            sta VOICEM
+            lda DIR             ; If the ship is in motion, don't
+            bne keep_vol        ;   mess with the volume
+            tya                 ; If the duration is shorter than a
+            cpy #$30            ;   dotted quarter note, don't mess
+            bcc keep_vol        ;   with the volume
+            lda VOLUME          ; Start at minimum volume; leave aux
+            and #$f0            ;   color alone
+            sta VOLUME          ;   ,,
+keep_vol:   tya
+            and #$f0            ; Mask away the note index
+            lsr
+            lsr
+            lsr
+            lsr
+            ldy TEMPO
+-loop:      clc
+            adc COUNTDOWN
+            sta COUNTDOWN
+            dey
+            bne loop
+NextNote:   inc CUR_NOTE
+            bne svc_r
+            inc CUR_NOTE+1
+svc_r:      rts
+eos:        jsr wsReset
+            rts       
+
+; Apply Effect
+; The effect command is in Y            
+wsEffect:   cpy #NO_EFFECT      ; Handle Placeholder
+            beq effect_r        ; ,,
+ch_legato:  cpy #LEGATO_ON      ; Handle legato
+            bne ch_leg_off      ; ,,
+            lda #$80            ; ,,
+            sta LEGATO          ; ,,
+            jmp NextNote
+ch_leg_off: cpy #LEGATO_OFF     ; Handle legato off
+            bne effect_r        ; ,,
+            lsr LEGATO          ; ,,
+effect_r:   jmp NextNote                       
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;  
+; EFFECTS SERVICE
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;              
+; Play Next Sound Effect
+; Rotates the 8-bit sound effect register and
+; plays the pitch      
+FXService:  lda FX_LEN          ; Has the sound been launched?
+            beq fx_end          ; If unlaunched, kill voice and return
+            dec FX_LEN          ; Decrement both length
+            dec FX_COUNT        ;   and countdown
+            bne fx_r            ; If countdown has elapsed,
+            lda FX_SPEED        ;   reset it with the current effect speed
+            sta FX_COUNT        ;   ,,
+            bit FX_DIR          ; Rotate the register, based on the direction
+            bmi fx_right        ;   specified by the direction flag
+fx_left:    lda #$00
+            asl FX_REG          ; Rotate the register left if flag = $00
+            adc FX_REG          ; If carry was set, set bit 0
+            jmp fx_update       ; Update and play the new frequency
+fx_right:   lsr FX_REG          ; Rotate the register right if flag = $80
+            lda FX_REG          ; ,,
+            bcc fx_play         ; If carry was set, set bit 7
+            lda #%10000000      ; ,,
+            ora FX_REG          ; ,,
+fx_update:  sta FX_REG          ; ,,
+fx_play:    ora #$80            ; Gate the high voice
+fx_end:     sta FX_VOICE        ; ,,
+fx_r:       rts      
+        
+; Launch Sound Effect
+; Preparations
+;     A - The sound effect index
+FXLaunch:   sei                 ; Don't play anything while setting up
+            asl                 ; Each effect has two bytes in the table
+            tax
+            lda FXTable,x       ; Get the register byte
+            sta FX_DIR          ; Set the direction (only bit 7 will be used)
+            and #$7f            ; Mask away the direction bit to get the 7-bit
+            sta FX_REG          ;   frequency
+            lda FXTable+1,x     ; Get the length byte
+            tax                 ;   and preserve it
+            and #$f0            ; Length is in bits 4-7 of the length byte
+            sta FX_LEN          ;  ,,
+            txa
+            and #$0f            ; Speed (jiffies per rotation) is in the low
+            sta FX_SPEED        ;   nybble of the length byte
+            sta FX_COUNT        ;   ,,
+            cli                 ; Go! 
             rts
                 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; DATA
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-Intro:      .asc $0d,$0d,$0d,$0d,$0d,$0d,$05,"     S U B ",$21," M E D    "
+Intro:      .asc $0d,$0d,$0d,$0d,$0d,$0d,$0d,$0d,$0d,$05,"     S U B  M E D"
             .asc $0d,$0d,$0d,"  JASON JUSTIAN 2020",$0d,$0d,$0d
             .asc "      PRESS FIRE",$00
 
 ; Manual Text            
-Manual:     .asc $93,$05,"OUR UNDERSEA BASE IS",$0d,$0d
+Manual:     .asc $93,$05,"AVAST",$0d,$0d
+            .asc "OUR UNDERSEA BASE IS",$0d,$0d
             .asc "IN DANGER",$0d,$0d,$0d
-            .asc $21," PICK UP A MED PACK",$0d,$0d
+            .asc $9e,$29,$05," NAVIGATE YOUR SUB",$0d,$0d
+            .asc $1c,$21,$05," PICK UP A MED PACK",$0d,$0d
             .asc "  FROM THE LIGHTHOUSE",$0d,$0d
-            .asc $29," WITH YOUR SUB",$0d,$0d
             .asc "@ DELIVER TO THE BASE",$0d,$0d
-            .asc $28," AVOID SEA LIFE ",$0d,$0d
+            .asc $1e,$28,$05," AVOID SEA LIFE ",$0d,$0d
             .asc $3a," WATCH YOUR OXYGEN ",$0d,$0d,$0d
-            .asc "GOOD LUCK",$0d,$0d
             .asc "            AGENT ANZU",$00
 
 ; Score Bar
@@ -914,29 +1134,76 @@ JoyTable:   .byte 0,$04,$80,$08,$10,$20            ; Corresponding direction bit
          
 ; Level Advancement Table           
 LevelPos:   .byte $01,$01,$02,$04,$06,$09,$0d,$10,$14           
+   
+; Degree to Note Value
+; Determined with electronic tuner
+Oct0:       .byte 0,194,197,201,204,207,209,212,214,217,219,221,223,225
+   
+; Music in wAxScore format 
+Theme:      .byte $2f,$2f,$26,$16,$18,$1a,$18,$16
+            .byte $1a,$28,$2d,$2d,$2d,$28,$18,$1a
+            .byte $1b,$1a,$18,$1b,$2a,$26,$23,$21 
+            .byte $26,$16,$18,$1a,$18,$16,$1a,$28
+            .byte $2d,$2d,$28,$2b,$2b,$1a,$1b,$1a
+            .byte $3f,$18,$16,$11,$18,$11,$1a,$11,$2d,$4f
+
+Theme2:     .byte $2f,$2f,$26,$16,$18,$1a,$18,$16
+            .byte $1a,$28,$2d,$2d,$2d,$28,$18,$1a
+            .byte $1b,$1a,$18,$1b,$2a,$26,$23,$21 
+            .byte $26,$16,$18,$1a,$18,$16,$1a,$28
+            .byte $2d,$2d,$28,$2b,$2b,$1a,$1b,$1a
+            .byte $18,$66
+
+Theme3:     .byte $3f,$1b,$1a,$4f,$1b,$16,$13,$16,$1b,$16 
+            .byte $13,$16,$18,$16,$14,$13,$24,$16 
+            .byte $18,$2d,$21,$1d,$1c,$1b,$18,$66 
+            .byte $1b,$1a,$1b,$16,$13,$16,$1b,$1a 
+            .byte $18,$16,$24,$26,$28,$16,$18,$1a 
+            .byte $1b,$18,$1b,$1d,$1b,$1a,$1d,$6b
+
+Theme4:     .byte $3f,$1b,$1a,$1b,$16,$13,$16,$1b,$16 
+            .byte $13,$16,$18,$16,$14,$13,$24,$16 
+            .byte $18,$2d,$21,$1d,$1c,$1b,$18,$66 
+            .byte $1b,$1a,$1b,$16,$13,$16,$1b,$1a 
+            .byte $18,$16,$24,$26,$28,$16,$18,$1a 
+            .byte $1b,$18,$1b,$1d,$1b,$1a,$1d,$8b,$4f
+
+            .byte $00
+            
+; Sound effects for the sound effects player
+; Each effect has four parameters (DFFFFFFF LLLLSSSS)
+;   (1) Bit 7 (D) of the first byte is the direction
+;       * Unset=shift left, or a rising sound 
+;       * Set=shift right, or a falling sound
+;   (2) Bits 0-6 (F) of the first byte is the frequency register
+;   (3) High nybble of the second byte (L) is the length in jiffies x 16
+;       * Between approx. 1/4 sec and 4 sec in length
+;   (4) Low nybble of second byte (S) is speed in jiffies
+FXTable:    .byte $8a,$13       ; 0- Med Pack Pickup
+            .byte $07,$34       ; 1- Med Pack Delivery
+            .byte $f0,$26       ; 2- Game Over
+            .byte $55,$24       ; 3- Low O2 Warning
+            .byte $87,$11       ; 4- Missing Med Pack
            
-Pad3583:    .asc "123456789012345678901234567890123456789012345678901234567890"  
-            .asc "123456789012345678901234567890123456789012345678901234567890"
-            .asc "123456789012345678901234567890123456789012345678901234567890"
-            .asc "123456789012345678901234567890123456789012345678901234567890"
-            .asc "123456789012345678901234567890123456789012345678901234567890"
-            .asc "123456789012345678901234567890123456789012345678901234567890"
-            .asc "123456789012345678901234567890123456789012345678901234567890"
-            .asc "123456789012345678901234567890123456789012345678901234567890"
-            .asc "123456789012345678901234567890123456789012345678901234567890"
-            .asc "123456789012345678901234567890123456789012345678901234567890"
-            .asc "123456789012345678901234567890123456789012345678901234567890"
-            .asc "123456789012345678901234567890123456789012345678901234567890"
-            .asc "123456789012345678901234567890123456789012345678901234567890"
-            .asc "123456789012345678901234567890123456789012345678901234567890"
-            .asc "123456789012345678901234567890123456789012345678901234567890"
-            .asc "123456789012345678901234567890123456789012345678901234567890"
-            .asc "123456789012345678901234567890123456789012345678901234567890"
-            .asc "123456789012345678901234567890123456789012345678901234567890"
-            .asc "123456789012345678901234567890123456789012345678901234567890"
-            .asc "123456789012345678901234567890123456789012345678901234567890"
-            .asc "12345678901234567890123456789012345"
-                       
+; Padding to 3583 bytes
+Padding:    .asc "2020 JASON JUSTIAN",$0d
+            .asc "JJUSTIAN@GMAIL.COM",$0d
+            .asc "BEIGEMAZE.COM/VICLAB",$0d
+            .asc "RELEASED UNDER CREATIVE COMMONS",$0d
+            .asc "ATTRIBUTION-NONCOMMERCIAL 4.0",$0d
+            .asc "INTERNATIONAL PUBLIC LICENSE",$0d
+            .asc "------------------------------",$00
+            .asc "ALL WORK AND NO PLAY MAKES JACK A DULL BOY",$00
+            .asc "ALL WORK AND NO PLAY MAKES JACK A DULL BOY",$00
+            .asc "ALL WORK AND NO PLAY MAKES JACK A DULL BOY",$00
+            .asc "ALL WORK AND NO PLAY MAKES JACK A DULL BOY",$00
+            .asc "ALL WORK AND NO PLAY MAKES JACK A DULL BOY",$00
+            .asc "ALL WORK AND NO PLAY MAKES JACK A DULL BOY",$00
+            .asc "ALL WORK AND NO PLAY MAKES JACK A DULL BOY",$00
+            .asc "ALL WORK AND NO PLAY MAKES JACK A DULL BOY",$00
+            .asc "ALL WORK AND NO PLAY MAKES JACK A DULL BOY",$00
+            .asc "ALL WORK AND NO PLAY MAKES JACK A DULL BOY",$00
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; CUSTOM CHARACTER SET
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -977,10 +1244,10 @@ CharSet:    .byte $00,$00,$3c,$42,$4a,$89,$a9,$bd ; Sea Base
             .byte $00,$44,$44,$44,$44,$38,$10,$10 ; Y
             .byte $00,$7c,$04,$08,$10,$20,$40,$7c ; Z
             .byte $55,$65,$65,$a9,$a9,$65,$65,$55 ; Med pack
-            .byte $3c,$42,$5a,$5a,$42,$3c,$c3,$81 ; <unused>
-            .byte $3c,$42,$5a,$5a,$42,$3c,$c3,$81 ; <unused>
-            .byte $3c,$42,$5a,$5a,$42,$3c,$c3,$81 ; <unused>
-            .byte $55,$65,$65,$a9,$a9,$65,$65,$55 ; <unused>
+            .byte $00,$03,$02,$02,$03,$03,$83,$c3 ; Title Sub I
+            .byte $00,$00,$00,$00,$c0,$c0,$c0,$c0 ; Title Sub II
+            .byte $fe,$ff,$ef,$c7,$ef,$fe,$fc,$f8 ; Title Sub III
+            .byte $ff,$ff,$fd,$78,$3d,$3f,$63,$61 ; Title Sub IV
             .byte $00,$00,$00,$00,$00,$00,$00,$00 ; Space
             .byte $00,$18,$18,$7e,$7e,$18,$18,$00 ; Med Pack (single color)
             .byte $3c,$42,$5a,$5a,$42,$3c,$c3,$81 ; <unused>
