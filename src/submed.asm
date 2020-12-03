@@ -92,6 +92,7 @@ TIME_M      = $a1               ; Jiffy counter middle
 ; Game Memory - Zeropage Pointers
 CURSOR      = $f9               ; Cursor (2 bytes)
 PLAYER      = $fb               ; Player location (2 bytes)
+BASE_COL    = $fd               ; Base color pointer (2 bytes)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; VARIABLES
@@ -183,12 +184,22 @@ ISR:        dec SEALIFE_CD
             pla                 ; ,,
             sta CURSOR          ; ,,
 o2_deplete: dec O2_CD
-            bne isr_r
+            bne flash_base
             dec OXYGEN          ; Deplete oxygen
             sec                 ; ,,
             ror SHOWSCORE       ; ,,
             lda #O2_RATE        ; Reset the countdown
             sta O2_CD           ; ,,
+flash_base: lda TIME_L
+            ror
+            bcc isr_r
+            ldx #$00
+            lda (BASE_COL,x)
+            tay
+            iny
+            tya
+            and #$07
+            sta (BASE_COL,x)
 isr_r:      jmp IRQ           
             
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -216,6 +227,8 @@ CheckMed:   bit HAVEMED         ; If the med pack is already picked up,
             sta OXYGEN          ;   ,,
             lda #PICKUP         ; Add points for pickup and display
             jsr ScoreBar        ;   score bar update
+            sec                 ; Set show score flag
+            ror SHOWSCORE       ; ,,
 check_r:    rts
 
 ; Set and Clear Med Pack
@@ -262,7 +275,8 @@ have_med:   clc                 ; Clear the med pack flag
             
 ; Level Up
 ; Move Sea Base to next level            
-LevelUp:    inc LEVEL
+LevelUp:    sei
+            inc LEVEL
             ldx LEVEL
             cpx #$01
             beq new_base
@@ -270,15 +284,15 @@ LevelUp:    inc LEVEL
             sta CURSOR
             lda LAST_BASE+1
             sta CURSOR+1
-            lda #TOPLAND
-            ldy #08
-            jsr DrawChar
+            lda #TOPLAND        ;   draw so that it doesn't get set
+            ldy #08             ;   to the wrong color by the ISR
+            jsr DrawChar        ;   ,,
             ldx LEVEL
-new_base:   cpx #$08                ; Base position maxes out at level 8
-            bcc get_pos             ; ,,
-            ldx #$08                ; ,,
-get_pos:    lda LevelPos,x          ; Get base postion from the table
-            sta $02                 ; Save for horizontal movement iterator
+new_base:   cpx #$08            ; Base position maxes out at level 8
+            bcc get_pos         ; ,,
+            ldx #$08            ; ,,
+get_pos:    lda LevelPos,x      ; Get base postion from the table
+            sta $02             ; Save for horizontal movement iterator
 drop_base:  lda #154
             sta CURSOR
             lda #>SCREEN
@@ -295,10 +309,14 @@ ch_floor:   jsr GetChar
             jmp ch_floor
 draw_base:  lda CURSOR
             sta LAST_BASE
+            sta BASE_COL
             lda CURSOR+1
             sta LAST_BASE+1
+            lda #$97
+            sta BASE_COL+1
             lda #SEABASE
             ldy #$01
+            cli
             jmp DrawChar
             
 ; Swim
@@ -475,6 +493,9 @@ GameOver:   jsr ShowScore
             jsr GetChar
             ldy #$00
             jsr DrawChar
+            lda #$00
+            ldx #$00
+            sta (BASE_COL,x)    ; Set base color to black
             sei
             jmp Start
             
@@ -845,6 +866,8 @@ next_reef:  lda #LANDCHAR       ; ,,
             jsr LevelUp         ; Move Seabase to level 1
             lda #$00            ; Initialize the score bar
             jsr ScoreBar        ; ,,
+            sec                 ; Show score bar immediately
+            ror SHOWSCORE       ; ,,
             lda #SEALIFE_GEN    ; Set sealife generation countdown
             sta SEALIFE_CD      ; ,,
             lda #O2_RATE        ; Set oxygen depletion countdown
@@ -909,8 +932,7 @@ Pad3583:    .asc "123456789012345678901234567890123456789012345678901234567890"
             .asc "123456789012345678901234567890123456789012345678901234567890"
             .asc "123456789012345678901234567890123456789012345678901234567890"
             .asc "123456789012345678901234567890123456789012345678901234567890"
-            .asc "123456789012345678901234567890123456789012345678901234567890"
-            .asc "123456789012345678901234"
+            .asc "1234567890123456789012345678901234567890123456"
                        
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; CUSTOM CHARACTER SET
@@ -924,7 +946,7 @@ Pad3583:    .asc "123456789012345678901234567890123456789012345678901234567890"
 ; a reliable method as long as you don't add anything AFTER this
 ; character data.
 ;                       
-CharSet:    .byte $3c,$42,$5a,$5a,$42,$3c,$c3,$81 ; Sea Base
+CharSet:    .byte $00,$00,$3c,$42,$4a,$89,$a9,$bd ; Sea Base
             .byte $00,$38,$44,$4c,$54,$64,$44,$44 ; A
             .byte $00,$78,$44,$44,$48,$54,$64,$78 ; B
             .byte $00,$38,$44,$40,$40,$44,$4c,$38 ; C
