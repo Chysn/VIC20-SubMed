@@ -44,7 +44,7 @@ O2_RATE     = $80               ; Oxygen depletion rate (jiffies)
 ; Score constants
 PICKUP      = 25                ; Score when a med pack is picked up
 DELIVERY    = 100               ; Score when a med pack is delivered
-O2_ADD      = $08               ; Oxygen added when surfacing
+O2_ADD      = $0a               ; Oxygen added when surfacing
 
 ; Character constants
 CO_PLAYER   = $07               ; Player color
@@ -243,6 +243,7 @@ o2_deplete: dec O2_CD
             sta O2_CD           ; ,,
 flash_base: lda TIME_L
             ror
+            ror
             bcc isr_r
             ldx #$00
             lda (BASE_COL,x)
@@ -332,20 +333,19 @@ have_med:   clc                 ; Clear the med pack flag
 ; Move Sea Base to next level            
 LevelUp:    sei
             inc LEVEL
-            ldx LEVEL
-            cpx #$01
+            lda LEVEL
+            cmp #$01
             beq new_base
             lda LAST_BASE
             sta CURSOR
             lda LAST_BASE+1
             sta CURSOR+1
-            lda #TOPLAND        ;   draw so that it doesn't get set
+            lda #TOPLAND        ; Draw the top so it doesn't get set
             ldy #08             ;   to the wrong color by the ISR
             jsr DrawChar        ;   ,,
-            ldx LEVEL
-new_base:   cpx #$08            ; Base position maxes out at level 8
-            bcc get_pos         ; ,,
-            ldx #$08            ; ,,
+            lda LEVEL
+            and #$0f            ; Max out at level 16
+new_base:   tax
 get_pos:    lda LevelPos,x      ; Get base postion from the table
             sta $02             ; Save for horizontal movement iterator
 drop_base:  lda #154
@@ -538,16 +538,6 @@ finish:     lda #$3f
             rts
             
 GameOver:   jsr wsStop          ; Stop the music
-            jsr ShowScore
-            lda #<HiTx
-            ldy #>HiTx
-            jsr PRTSTR
-            ldx HISCORE
-            lda HISCORE+1
-            jsr PRTFIX
-            lda #<GameOverTx
-            ldy #>GameOverTx
-            jsr PRTSTR
             lda #$08
             sta VOLUME
             jsr RSCursor
@@ -563,6 +553,16 @@ GameOver:   jsr wsStop          ; Stop the music
             jsr Delay
             clc                 ; Clear the game playing flag
             ror PLAY_FL         ; ,,
+            jsr ShowScore
+            lda #<HiTx
+            ldy #>HiTx
+            jsr PRTSTR
+            ldx HISCORE
+            lda HISCORE+1
+            jsr PRTFIX
+            lda #<GameOverTx
+            ldy #>GameOverTx
+            jsr PRTSTR
             jmp Start
             
 ; Show Score
@@ -643,8 +643,6 @@ move_r:     rts
 ; Turn
 ; Perform a turning maneuver in the direction (RIGHT, LEFT) in Accumulator
 Turn:       sta TRAVEL          ; Switch the direction of travel
-            lda #PL_SPEED       ; Reset the sub speed to slowest
-            sta SUBSPEED        ; ,,
             jsr RSCursor
 next_turn:  lda SUBCHAR         ; Start turn with the current character
             ldy #CO_PLAYER      ; ,,
@@ -1123,7 +1121,7 @@ DirTable:   .byte 0,$ea,$01,$16,$ff
 JoyTable:   .byte 0,$04,$80,$08,$10,$20            ; Corresponding direction bit
          
 ; Level Advancement Table           
-LevelPos:   .byte $01,$01,$02,$04,$06,$09,$0d,$10,$14           
+LevelPos:   .byte $09,$02,$04,$06,$08,$0a,$0c,$0e,$10,$12,$14,$13,$11,$0f,$0d,$0b    
    
 ; Degree to Note Value
 ; Determined with electronic tuner
