@@ -874,12 +874,12 @@ sky_adv:    dec $02             ; Until done
             lda CURSOR          ; Draw Lighthouse
             sbc #43             ; ,,
             sta CURSOR          ; ,,
-            lda #$23            ; ,,
+            lda #$22            ; ,,
             ldy #$03            ; ,,
             jsr DrawChar        ; ,,
             ldx #DOWN           ; ,,
             jsr MoveCursor      ; ,,
-            lda #$24            ; ,,
+            lda #$23            ; ,,
             ldy #$03            ; ,,
             jsr DrawChar        ; ,,
             lda #16             ; Draw land edge
@@ -1093,12 +1093,13 @@ FXLaunch:   sei                 ; Don't play anything while setting up
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; DATA
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-Intro:      .asc $0d,$0d,$0d,$0d,$0d,$0d,$0d,$0d,$0d,$05,"     S U B  M E D"
-            .asc $0d,$0d,$0d,"  JASON JUSTIAN 2020",$0d,$0d,$0d
+Intro:      .asc $0d,$0d,$0d,$0d,$0d,$0d,$0d,$0d,$0d,$05
+            .asc "  ",$24,"  S U B  M E D  ",$24
+            .asc $0d,$0d,$0d,$9f,"  JASON JUSTIAN 2020",$0d,$0d,$0d
             .asc "      PRESS FIRE",$00
 
 ; Manual Text            
-Manual:     .asc $93,$05,"AVAST",$0d,$0d
+Manual:     .asc $93,$05,"AVAST",$0d,$0d,$0d
             .asc "OUR UNDERSEA BASE IS",$0d,$0d
             .asc "IN DANGER",$0d,$0d,$0d
             .asc $9e,$29,$05," NAVIGATE YOUR SUB",$0d,$0d
@@ -1180,7 +1181,7 @@ Padding:    .asc "2020 JASON JUSTIAN",$0d
             .asc "RELEASED UNDER CREATIVE COMMONS",$0d
             .asc "ATTRIBUTION-NONCOMMERCIAL 4.0",$0d
             .asc "INTERNATIONAL PUBLIC LICENSE",$0d
-            .asc "-------------------------------------------",$00
+            .asc "--------------------------------------",$00
             .asc "ALL WORK AND NO PLAY MAKES JACK A DULL BOY",$00
             .asc "ALL WORK AND NO PLAY MAKES JACK A DULL BOY",$00
             .asc "ALL WORK AND NO PLAY MAKES JACK A DULL BOY",$00
@@ -1234,13 +1235,13 @@ CharSet:    .byte $00,$00,$3c,$42,$4a,$89,$a9,$bd ; Sea Base
             .byte $55,$65,$65,$a9,$a9,$65,$65,$55 ; Med pack
             .byte $00,$03,$02,$02,$03,$03,$83,$c3 ; Title Sub I
             .byte $00,$00,$00,$00,$c0,$c0,$c0,$c0 ; Title Sub II
-            .byte $fe,$ff,$ef,$c7,$ef,$fe,$fc,$f8 ; Title Sub III
-            .byte $ff,$ff,$fd,$78,$3d,$3f,$63,$61 ; Title Sub IV
+            .byte $fe,$ff,$fb,$db,$df,$fe,$fc,$f0 ; Title Sub III
+            .byte $ff,$ff,$f7,$76,$3e,$1f,$73,$61 ; Title Sub IV
             .byte $00,$00,$00,$00,$00,$00,$00,$00 ; Space
             .byte $00,$18,$18,$7e,$7e,$18,$18,$00 ; Med Pack (single color)
-            .byte $3c,$42,$5a,$5a,$42,$3c,$c3,$81 ; <unused>
             .byte $e7,$bd,$81,$e7,$e7,$db,$db,$c3 ; Lighthouse Upper
             .byte $c3,$bd,$bd,$81,$81,$bd,$a5,$a5 ; Lighthouse Lower
+            .byte $10,$28,$10,$7c,$10,$92,$7c,$10 ; Anchor
             .byte $ff,$ff,$ff,$ff,$ff,$ff,$ff,$ff ; Sea floor (multi)
             .byte $3c,$3c,$ff,$ff,$ff,$ff,$ff,$ff ; Sea floor top (multi)
             .byte $00,$00,$0d,$1e,$0d,$00,$00,$00 ; Fish 1
