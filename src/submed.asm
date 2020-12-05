@@ -20,7 +20,7 @@
 ; runs this game
 ;     42 SYS4110
 * = $1001
-BASIC:      .byte $0b,$04,$2a,$00,$9e,$34,$31,$31
+BASIC:      .byte $0b,$10,$2a,$00,$9e,$34,$31,$31
             .byte $30,$00,$00,$00,$00
             jmp Startup
          
@@ -120,6 +120,7 @@ OXYGEN:     .byte $00           ; Oxygen
 SHOWSCORE:  .byte $00           ; Score Bar show flag
 O2_CD:      .byte $00           ; Oxygen depletion countdown
 PLAY_FL:    .byte $00           ; Play flag - bit 7 when game is going on
+GAME_O2:    .byte $00           ; O2 depletion rate in game
 
 ; Music Player Memory                 
 TEMPO:      .byte $04           ; Tempo (jiffies per eighth note)
@@ -239,10 +240,13 @@ o2_deplete: dec O2_CD           ; Handle the countdown for oxygen usage
             dec OXYGEN          ; Deplete oxygen
             sec                 ; ,,
             ror SHOWSCORE       ; ,,
-            lda #O2_RATE        ; Reset the countdown
+            lda GAME_O2         ; Reset the countdown
             sta O2_CD           ; ,,
-flash_base: lda TIME_L          ; Flash the colors of the current base
-            and #$03            ; (leave out odd-numbered colors)
+flash_base: bit HAVEMED         ; Don't flash the base until the med pack
+            bpl isr_r           ;   has been picked up
+            lda TIME_L          ; Flash the colors of the current base
+            and #$07            ;
+            ora #$01            ; (leave out odd-numbered colors)
             ldx #$00            ; ,,
             sta (BASE_COL,x)    ; ,,
 isr_r:      jmp IRQ           
@@ -327,10 +331,8 @@ have_med:   clc                 ; Clear the med pack flag
 ; Level Up
 ; Move Sea Base to next level            
 LevelUp:    sei                 ; Stop interrupts while we level up
-            inc LEVEL           ; Increase the level by 1
             lda LEVEL           ; If the game just started, there's no need
-            cmp #$01            ;   to remove a previous base. Just add
-            beq new_base        ;   a new one
+            beq new_base        ;   to clear the previous base position
             lda LAST_BASE       ;   ,,
             sta CURSOR          ;   ,,
             lda LAST_BASE+1     ;   ,,
@@ -367,6 +369,8 @@ draw_base:  lda CURSOR          ; Once the floor is reached, store the location
             lda #SEABASE        ;   ,,
             ldy #$01            ;   ,,
             jsr DrawChar        ;   ,,
+            dec GAME_O2         ; Make the oxygen deplete a LITTLE faster
+            inc LEVEL           ; Increment level
             cli                 ; Restore the interrupt so stuff can keep going
             rts
             
@@ -509,9 +513,9 @@ show_score: jsr ShowScore
             lda OXYGEN          ; Get the current oxygen level
             beq GameOver        ; End game if oxygen goes to 0
             sta $02             ; Oxygen counter
-            cmp #$06            ; If the oxygen gets low, make the
+            cmp #$08            ; If the oxygen gets low, make the
             bcs o2_bar          ;   oxygen bar red
-            lda #$9c            ;   ,,
+            lda #$1c            ;   ,,
             jsr CHROUT          ;   ,,
             lda #$03            ; Emit warning sound when O2 is low
             jsr FXLaunch        ; ,,
@@ -533,32 +537,35 @@ finish:     lda #$3f
             rts
             
 GameOver:   jsr wsStop          ; Stop the music
-            lda #$08
-            sta VOLUME
-            jsr RSCursor
-            jsr GetChar
-            ldy #$00
-            jsr DrawChar
-            lda #$02
-            jsr FXLaunch
-            lda #$40
-            jsr Delay
+            lda #$08            ; Set the aux color to black
+            sta VOLUME          ; ,,
+            jsr RSCursor        ; Set the sub color to black
+            jsr GetChar         ; ,,
+            ldy #$00            ; ,,
+            jsr DrawChar        ; ,,
+            clc                 ; Clear the med pack flag so that the
+            ror HAVEMED         ;   ISR doesn't change the base color
+            ldx #$00            ; Set the base color to black
+            lda #$00            ; ,,
+            sta (BASE_COL,x)    ; ,,
+            lda #$02            ; Launch the Game Over sound
+            jsr FXLaunch        ; ,,
+            lda #$40            ; Wait for a little bit for the sound
+            jsr Delay           ;   to end
             clc                 ; Clear the game playing flag
             ror PLAY_FL         ; ,,
-            lda #$00
-            ldx #$00
-            sta (BASE_COL,x)    ; Set base color to black
-            jsr ShowScore
-            lda #<HiTx
-            ldy #>HiTx
-            jsr PRTSTR
-            ldx HISCORE
-            lda HISCORE+1
-            jsr PRTFIX
-            lda #<GameOverTx
-            ldy #>GameOverTx
-            jsr PRTSTR
-            jmp Start
+            lda #$00            ; Show the final score
+            jsr ShowScore       ; ,,
+            lda #<HiTx          ; Show the high score
+            ldy #>HiTx          ; ,,
+            jsr PRTSTR          ; ,,
+            ldx HISCORE         ; ,,
+            lda HISCORE+1       ; ,,
+            jsr PRTFIX          ; ,,
+            lda #<GameOverTx    ; Show the GAME OVER message
+            ldy #>GameOverTx    ; ,,
+            jsr PRTSTR          ; ,,
+            jmp Start           ; Go back and wait for a new game to start
             
 ; Show Score
 ; For score bar and game over            
@@ -837,6 +844,8 @@ InitGame:   lda #SCRCOM         ; Set background color
             jsr CLSR            ; Clear Screen
             lda #$88            ; Set volume and aux color
             sta VOLUME          ; ,,
+            lda #O2_RATE        ; Set the starting O2 depletion rate
+            sta GAME_O2         ; ,,
             lda #$00            ; Initialize score and level
             sta SCORE           ; ,,
             sta SCORE+1         ; ,,
@@ -1117,7 +1126,8 @@ DirTable:   .byte 0,$ea,$01,$16,$ff
 JoyTable:   .byte 0,$04,$80,$08,$10,$20            ; Corresponding direction bit
          
 ; Level Advancement Table           
-LevelPos:   .byte $09,$02,$04,$06,$08,$0a,$0c,$0e,$10,$12,$14,$13,$11,$0f,$0d,$0b    
+LevelPos:   .byte $02,$04,$06,$08,$0a,$0c,$0e,$10
+            .byte $12,$14,$13,$11,$0f,$0d,$0b,$09    
    
 ; Degree to Note Value
 ; Determined with electronic tuner
@@ -1176,8 +1186,7 @@ Padding:    .asc "2020 JASON JUSTIAN",$0d
             .asc "RELEASED UNDER CREATIVE COMMONS",$0d
             .asc "ATTRIBUTION-NONCOMMERCIAL 4.0",$0d
             .asc "INTERNATIONAL PUBLIC LICENSE",$0d
-            .asc  $00
-            .asc "ALL WORK AND NO PLAY MAKES JACK A DULL BOY",$00
+            .asc "----------------------",$00
             .asc "ALL WORK AND NO PLAY MAKES JACK A DULL BOY",$00
             .asc "ALL WORK AND NO PLAY MAKES JACK A DULL BOY",$00
             .asc "ALL WORK AND NO PLAY MAKES JACK A DULL BOY",$00
