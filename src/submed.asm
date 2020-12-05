@@ -549,8 +549,7 @@ GameOver:   jsr wsStop          ; Stop the music
             sta (BASE_COL,x)    ; ,,
             lda #$02            ; Launch the Game Over sound
             jsr FXLaunch        ; ,,
-            lda #$40            ; Wait for a little bit for the sound
-            jsr Delay           ;   to end
+            jsr FXWait          ; Wait until the Game Over sound ends
             clc                 ; Clear the game playing flag
             ror PLAY_FL         ; ,,
             lda #$00            ; Show the final score
@@ -1070,7 +1069,13 @@ fx_right:   lsr FX_REG          ; Rotate the register right if flag = $80
 fx_update:  sta FX_REG          ; ,,
 fx_play:    ora #$80            ; Gate the high voice
 fx_end:     sta FX_VOICE        ; ,,
-fx_r:       rts      
+fx_r:       rts 
+
+; Wait for End
+; Do nothing until the current effect ends
+FXWait:     lda FX_LEN
+            bne FXWait
+            jmp fx_end
         
 ; Launch Sound Effect
 ; Preparations
@@ -1185,7 +1190,7 @@ Padding:    .asc "2020 JASON JUSTIAN",$0d
             .asc "RELEASED UNDER CREATIVE COMMONS",$0d
             .asc "ATTRIBUTION-NONCOMMERCIAL 4.0",$0d
             .asc "INTERNATIONAL PUBLIC LICENSE",$0d
-            .asc "-------------------------",$00
+            .asc "-------------------",$00
             .asc "ALL WORK AND NO PLAY MAKES JACK A DULL BOY",$00
             .asc "ALL WORK AND NO PLAY MAKES JACK A DULL BOY",$00
             .asc "ALL WORK AND NO PLAY MAKES JACK A DULL BOY",$00
