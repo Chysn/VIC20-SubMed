@@ -1140,7 +1140,7 @@ Manual:     .asc $93,$05,"AVAST",$0d,$0d,$0d
 
 ; Score Bar
 ScoreTx:    .asc $13,$05,"SCORE ",$00
-HiTx:       .asc "HIGH ",$00
+HiTx:       .asc "  HIGH ",$00
 GameOverTx: .asc $13,$11,$11,$11,$11,$11,$11,$11,$11
             .asc $1d,$1d,$1d,$1d,$1d,$1d
             .asc $05," GAME OVER ",$00
@@ -1210,7 +1210,7 @@ Padding:    .asc "2020 JASON JUSTIAN",$0d
             .asc "RELEASED UNDER CREATIVE COMMONS",$0d
             .asc "ATTRIBUTION-NONCOMMERCIAL 4.0",$0d
             .asc "INTERNATIONAL PUBLIC LICENSE",$0d
-            .asc "-------------------------",$00
+            .asc "-----------------------",$00
             .asc "ALL WORK AND NO PLAY MAKES JACK A DULL BOY",$00
             .asc "ALL WORK AND NO PLAY MAKES JACK A DULL BOY",$00
             .asc "ALL WORK AND NO PLAY MAKES JACK A DULL BOY",$00
