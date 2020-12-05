@@ -42,7 +42,7 @@ O2_START    = $20               ; Starting oxygen
 O2_RATE     = $80               ; Oxygen depletion rate (jiffies)
 
 ; Score constants
-PICKUP      = 25                ; Score when a med pack is picked up
+PICKUP      = 50                ; Score when a med pack is picked up
 DELIVERY    = 100               ; Score when a med pack is delivered
 O2_ADD      = $0a               ; Oxygen added when surfacing
 
@@ -272,11 +272,11 @@ CheckMed:   bit HAVEMED         ; If the med pack is already picked up,
             adc #O2_ADD         ;   ,,
             sta OXYGEN          ;   ,,
             cmp #O2_START       ; Ensure that the oxygen doesn't exceed the
-            bcc check_r         ;   starting level
+            bcc score_pu        ;   starting level
             lda #O2_START       ;   ,,
             sta OXYGEN          ;   ,,
             lda #PICKUP         ; Add points for pickup and display
-            jsr ScoreBar        ;   score bar update
+score_pu:   jsr ScoreBar        ;   score bar update
             sec                 ; Set show score flag
             ror SHOWSCORE       ; ,,
 check_r:    rts
@@ -489,14 +489,12 @@ Delay:      clc
 ; Score
 ; Add score in Accumulator (positive or negative), then show
 ; score bar
-ScoreBar:   sei                 ; Stop interrupt during score bar display
-            clc
+ScoreBar:   clc
             adc SCORE
             sta SCORE
-            lda #$00
-            adc SCORE+1
-            sta SCORE+1
-            lda HISCORE+1       ; Is the last score greater than
+            bcc check_hi
+            inc SCORE+1
+check_hi:   lda HISCORE+1       ; Is the last score greater than
             cmp SCORE+1         ;   the high score?
             bcc new_hs          ;   ,,
             bne show_score      ;   ,,
@@ -507,7 +505,8 @@ new_hs:     lda SCORE           ; A new high score has been
             sta HISCORE         ; achived; update high score
             lda SCORE+1         ; ,,
             sta HISCORE+1       ; ,,                
-show_score: jsr ShowScore
+show_score: sei                 ; Stop interrupt during score bar display
+            jsr ShowScore
             lda #O2_CHAR
             jsr CHROUT
             lda OXYGEN          ; Get the current oxygen level
@@ -1186,7 +1185,7 @@ Padding:    .asc "2020 JASON JUSTIAN",$0d
             .asc "RELEASED UNDER CREATIVE COMMONS",$0d
             .asc "ATTRIBUTION-NONCOMMERCIAL 4.0",$0d
             .asc "INTERNATIONAL PUBLIC LICENSE",$0d
-            .asc "----------------------",$00
+            .asc "-------------------------",$00
             .asc "ALL WORK AND NO PLAY MAKES JACK A DULL BOY",$00
             .asc "ALL WORK AND NO PLAY MAKES JACK A DULL BOY",$00
             .asc "ALL WORK AND NO PLAY MAKES JACK A DULL BOY",$00
