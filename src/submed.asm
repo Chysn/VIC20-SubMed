@@ -36,7 +36,7 @@ RIGHT       = $02               ; ,,
 DOWN        = $03               ; ,,
 LEFT        = $04               ; ,,
 FIRE        = $05               ; Joystick fire button pressed
-PL_SPEED    = $05               ; Player speed (delay per pixel, in jiffies)
+LO_SPEED    = $06               ; Player speed (delay per pixel, in jiffies)
 SEALIFE_GEN = $30               ; Sealife generation frequency (jiffies)
 O2_START    = $20               ; Starting oxygen
 O2_RATE     = $80               ; Oxygen depletion rate (jiffies)
@@ -203,7 +203,7 @@ control:    jsr Joystick        ; Read the joystick
             lda SUBCHAR         ;   ,,
             ldy #CO_PLAYER      ;   ,,
             jsr DrawChar        ;   ,,
-            lda #PL_SPEED       ;   ,,
+            lda #LO_SPEED       ;   ,,
             sta SUBSPEED        ;   ,,
             lda #$3f            ; Show the pitometer as stopped
             sta $1e15           ; ,,
@@ -588,7 +588,7 @@ ShowScore:  lda #<ScoreTx
 ; Display pitometer based on current speed  
 ; Speed is in Y          
 Pitometer:  pha
-            lda #$39
+            lda #$38
             clc
             adc SUBSPEED
             sta $1e15
@@ -628,7 +628,7 @@ not_turn:   sta DIR             ; Set the direction
             jmp TouchBase       ; ,,
 is_clear:   cmp #$20            ; If there's a non-space, do not move
             beq do_move         ; ,,
-            lda #PL_SPEED       ; If an obstacle has been struck (fish, land)
+            lda #LO_SPEED       ; If an obstacle has been struck (fish, land)
             sta SUBSPEED        ;   reduce speed
             rts
 do_move:    lda #CHAR_D         ; Draw the bitmap destination character at the
@@ -636,10 +636,28 @@ do_move:    lda #CHAR_D         ; Draw the bitmap destination character at the
             jsr DrawChar        ;   ,,
             ldx #$08            ; Move the character 8 pixels in the selected
 -loop:      jsr MoveBitmap      ;   direction, with a short delay between each
-            lda #$c0            ;   pixel. The engine sound is a pulse
+            lda #$e0            ;   pixel. The engine sound is a pulse
             sta VOICEL          ;   followed by silence.
-            lda #01             ;   ,,
-            jsr Delay           ;   ,,
+            ldy #$80            ; Tune pulse delay here
+pulse:      dec $00             ;
+            bit $ffff           ; A bunch of cycles
+            bit $ffff
+            bit $ffff
+            bit $ffff
+            bit $ffff
+            bit $ffff
+            bit $ffff
+            bit $ffff
+            bit $ffff
+            bit $ffff
+            bit $ffff
+            bit $ffff
+            bit $ffff
+            bit $ffff
+            bit $ffff
+            bit $ffff
+            dey
+            bne pulse
             lda #$00            ;   ,,
             sta VOICEL          ;   ,,
             lda SUBSPEED        ;   ,,
@@ -654,9 +672,9 @@ do_move:    lda #CHAR_D         ; Draw the bitmap destination character at the
             sta DIR             ; ,,
             dec SUBSPEED        ; Pick up speed with each movement until the
             lda SUBSPEED        ;   sub is turned, or until the joystick is
-            cmp #$01            ;   released.
+            cmp #$02            ;   released.
             bne move_r          ; But enforce a maximum speed
-            lda #$02            ; ,,
+            lda #$03            ; ,,
             sta SUBSPEED        ; ,,
 move_r:     rts
 
@@ -1212,9 +1230,7 @@ Padding:    .asc "2020 JASON JUSTIAN",$0d
             .asc "RELEASED UNDER CREATIVE COMMONS",$0d
             .asc "ATTRIBUTION-NONCOMMERCIAL 4.0",$0d
             .asc "INTERNATIONAL PUBLIC LICENSE",$0d
-            .asc "-------",$00
-            .asc "ALL WORK AND NO PLAY MAKES JACK A DULL BOY",$00
-            .asc "ALL WORK AND NO PLAY MAKES JACK A DULL BOY",$00
+            .asc "-------------------------------------------",$00
             .asc "ALL WORK AND NO PLAY MAKES JACK A DULL BOY",$00
             .asc "ALL WORK AND NO PLAY MAKES JACK A DULL BOY",$00
             .asc "ALL WORK AND NO PLAY MAKES JACK A DULL BOY",$00
