@@ -522,7 +522,7 @@ show_score: sei                 ; Stop interrupt during score bar display
             jsr FXLaunch        ; ,,
             lda $02             ; Restore the oxygen temp register
 o2_bar:     cmp #$04
-            bcc pit_dial        ; If oxygen is under 4, then wrap it up
+            bcc finish          ; If oxygen is under 4, then wrap it up
             lda #O2_CHAR+1
             jsr CHROUT
             lda $02            
@@ -530,14 +530,14 @@ o2_bar:     cmp #$04
             sbc #$04
             sta $02
             jmp o2_bar
-pit_dial:   lda #$24            ; Draw pitometer dial
-            sta $1e14           ; ,,
-            lda #$01            ; ,,
-            sta $9614           ; ,,
-            lda #$3f
+finish:     lda #$3f
             sec
             sbc $02
             jsr CHROUT          ; Add the end of the oxygen meter
+            lda #$24            ; Draw pitometer dial
+            sta $1e14           ; ,,
+            lda #$01            ; ,,
+            sta $9614           ; ,,            
             cli                 ; Restart interrupt
             rts
             
@@ -641,21 +641,21 @@ do_move:    lda #CHAR_D         ; Draw the bitmap destination character at the
             ldy #$80            ; Tune pulse delay here
 pulse:      dec $00             ;
             bit $ffff           ; A bunch of cycles
-            bit $ffff
-            bit $ffff
-            bit $ffff
-            bit $ffff
-            bit $ffff
-            bit $ffff
-            bit $ffff
-            bit $ffff
-            bit $ffff
-            bit $ffff
-            bit $ffff
-            bit $ffff
-            bit $ffff
-            bit $ffff
-            bit $ffff
+            bit $ffff           ; ,,
+            bit $ffff           ; ,,
+            bit $ffff           ; ,,
+            bit $ffff           ; ,,
+            bit $ffff           ; ,,
+            bit $ffff           ; ,,
+            bit $ffff           ; ,,
+            bit $ffff           ; ,,
+            bit $ffff           ; ,,
+            bit $ffff           ; ,,
+            bit $ffff           ; ,,
+            bit $ffff           ; ,,
+            bit $ffff           ; ,,
+            bit $ffff           ; ,,
+            bit $ffff           ; ,,
             dey
             bne pulse
             lda #$00            ;   ,,
@@ -680,7 +680,9 @@ move_r:     rts
 
 ; Turn
 ; Perform a turning maneuver in the direction (RIGHT, LEFT) in Accumulator
-Turn:       sta TRAVEL          ; Switch the direction of travel
+Turn:       ldy #$a8            ; Turn on water noise during turn
+            sty NOISE           ; ,,
+            sta TRAVEL          ; Switch the direction of travel
             jsr RSCursor
 next_turn:  lda SUBCHAR         ; Start turn with the current character
             ldy #CO_PLAYER      ; ,,
@@ -694,12 +696,14 @@ next_turn:  lda SUBCHAR         ; Start turn with the current character
             lda #$29            ;   ,,
             cmp SUBCHAR         ;   ,,
             bne next_turn       ;   ,,
-            rts                 ; Leftward turn is done
+            beq turn_r
 turn_right: inc SUBCHAR         ; If the new direction is right, then increment
             lda #$2d            ;   the sub character until it gets to $2d
             cmp SUBCHAR         ;   ,,
             bne next_turn       ;   ,,
-turn_r:     rts                 ; Rightward turn is done
+turn_r:     ldy #$00            ; Turn off noise
+            sty NOISE           ; ,,
+            rts                 ; Rightward turn is done
 
 ; Move Bitmap
 MoveBitmap: lda DIR
@@ -1230,7 +1234,7 @@ Padding:    .asc "2020 JASON JUSTIAN",$0d
             .asc "RELEASED UNDER CREATIVE COMMONS",$0d
             .asc "ATTRIBUTION-NONCOMMERCIAL 4.0",$0d
             .asc "INTERNATIONAL PUBLIC LICENSE",$0d
-            .asc "-------------------------------------------",$00
+            .asc "--------------------------------",$00
             .asc "ALL WORK AND NO PLAY MAKES JACK A DULL BOY",$00
             .asc "ALL WORK AND NO PLAY MAKES JACK A DULL BOY",$00
             .asc "ALL WORK AND NO PLAY MAKES JACK A DULL BOY",$00
