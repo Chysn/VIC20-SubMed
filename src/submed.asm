@@ -159,28 +159,28 @@ Welcome:    clc                 ; Disable the playing flag, in case we get
             lda #<Intro         ; Show Intro
             ldy #>Intro         ; ,,
             jsr PRTSTR          ; ,,
-            lda #120
-            sta CURSOR
-            lda #$1e
-            sta CURSOR+1
-            lda #$1c
-            ldy #$07
-            jsr DrawChar
-            ldx #RIGHT
-            jsr MoveCursor
-            lda #$1d
-            ldy #$07
-            jsr DrawChar
-            ldx #DOWN
-            jsr MoveCursor
-            lda #$1e
-            ldy #$07
-            jsr DrawChar
-            ldx #LEFT
-            jsr MoveCursor
-            lda #$1f
-            ldy #$07
-            jsr DrawChar
+            lda #120            ; Draw the large version of the sub, as
+            sta CURSOR          ;   a set of four 8x8 characters
+            lda #$1e            ;   ,,
+            sta CURSOR+1        ;   ,,
+            lda #$1c            ;   ,,
+            ldy #$07            ;   ,,
+            jsr DrawChar        ;   ,,
+            ldx #RIGHT          ;   ,,
+            jsr MoveCursor      ;   ,,
+            lda #$1d            ;   ,,
+            ldy #$07            ;   ,,
+            jsr DrawChar        ;   ,,
+            ldx #DOWN           ;   ,,
+            jsr MoveCursor      ;   ,,
+            lda #$1e            ;   ,,
+            ldy #$07            ;   ,,
+            jsr DrawChar        ;   ,,
+            ldx #LEFT           ;   ,,
+            jsr MoveCursor      ;   ,,
+            lda #$1f            ;   ,,
+            ldy #$07            ;   ,,
+            jsr DrawChar        ;   ,,
             jsr Wait4Fire
             lda #<Manual        ; Show the game manual
             ldy #>Manual        ; ,,
@@ -191,11 +191,11 @@ Start:      jsr Wait4Fire
             jsr InitGame
 
 ; Main loop            
-Main:       bit SHOWSCORE
-            bpl control
-            lda #$00
-            sta SHOWSCORE
-            jsr ScoreBar
+Main:       bit SHOWSCORE       ; If the ISR determined that the score bar
+            bpl control         ;   needs to be shown (e.g., there was a change
+            lda #$00            ;   to oxygen level), clear the score flag
+            sta SHOWSCORE       ;   and then show the score bar
+            jsr ScoreBar        ;   ,,
 control:    jsr Joystick        ; Read the joystick
             bne ch_fire         ; If no movement, draw the sub, reduce the
             jsr RSCursor        ;   speed
@@ -221,7 +221,7 @@ ISR:        bit PLAY_FL         ; If the game is over, don't do anything
             bpl isr_r           ;   in this routine
             jsr FXService       ; Service sound effect
             jsr wsService       ; Service music
-            dec SEALIFE_CD
+            dec SEALIFE_CD      ; Handle the countdown for moving fish
             bne o2_deplete
             lda SEALIFE_GEN     ; Reset countdown timer
             sta SEALIFE_CD      ; ,,
@@ -234,24 +234,17 @@ ISR:        bit PLAY_FL         ; If the game is over, don't do anything
             sta CURSOR+1        ; ,,
             pla                 ; ,,
             sta CURSOR          ; ,,
-o2_deplete: dec O2_CD
+o2_deplete: dec O2_CD           ; Handle the countdown for oxygen usage
             bne flash_base
             dec OXYGEN          ; Deplete oxygen
             sec                 ; ,,
             ror SHOWSCORE       ; ,,
             lda #O2_RATE        ; Reset the countdown
             sta O2_CD           ; ,,
-flash_base: lda TIME_L
-            ror
-            ror
-            bcc isr_r
-            ldx #$00
-            lda (BASE_COL,x)
-            tay
-            iny
-            tya
-            and #$07
-            sta (BASE_COL,x)
+flash_base: lda TIME_L          ; Flash the colors of the current base
+            and #$03            ; (leave out odd-numbered colors)
+            ldx #$00            ; ,,
+            sta (BASE_COL,x)    ; ,,
 isr_r:      jmp IRQ           
             
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -259,13 +252,14 @@ isr_r:      jmp IRQ
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;                        
 CheckMed:   bit HAVEMED         ; If the med pack is already picked up,
             bmi check_r         ;   no need to check it
-            lda CURSOR+1
-            cmp #>SCREEN
-            bne check_r
-            lda CURSOR
-            cmp #155
-            bne check_r
-            ror HAVEMED         ; Set med pack flag
+            jsr RSCursor        ; Set cursor to the current player position
+            lda CURSOR+1        ; See if the player is immediately under the
+            cmp #>SCREEN        ;   med pack
+            bne check_r         ;   ,,
+            lda CURSOR          ;   ,,
+            cmp #155            ;   ,,
+            bne check_r         ;   ,,
+            ror HAVEMED         ; Set med pack flag if under the med pack
             jsr ClrMedPack      ; Clear the med pack icon
             lda #$00            ; Play sound effect for med pack pickup
             jsr FXLaunch        ; ,,
@@ -283,14 +277,15 @@ CheckMed:   bit HAVEMED         ; If the med pack is already picked up,
             ror SHOWSCORE       ; ,,
 check_r:    rts
 
-; Set and Clear Med Pack
-SetMedPack: lda #MEDPACK
-            ldy #$0a
-            jmp DrawMed            
+; Set Med Pack
+SetMedPack: lda #MEDPACK        ; Set the med pack on (when it's delivered)
+            ldy #$0a            ; ,,
+            jmp DrawMed         ; ,,
 
-ClrMedPack: lda #LANDCHAR
-            ldy #CO_SKY
-            jmp DrawMed                        
+; Clear Med Pack            
+ClrMedPack: lda #LANDCHAR       ; Set the med pack off (when it's picked up)
+            ldy #CO_SKY         ; ,,
+            jmp DrawMed         ; ,,           
 
 ; Draw Med Pack Location
 ; Used by both SetMedPack and ClrMedPack
@@ -331,97 +326,97 @@ have_med:   clc                 ; Clear the med pack flag
             
 ; Level Up
 ; Move Sea Base to next level            
-LevelUp:    sei
-            inc LEVEL
-            lda LEVEL
-            cmp #$01
-            beq new_base
-            lda LAST_BASE
-            sta CURSOR
-            lda LAST_BASE+1
-            sta CURSOR+1
+LevelUp:    sei                 ; Stop interrupts while we level up
+            inc LEVEL           ; Increase the level by 1
+            lda LEVEL           ; If the game just started, there's no need
+            cmp #$01            ;   to remove a previous base. Just add
+            beq new_base        ;   a new one
+            lda LAST_BASE       ;   ,,
+            sta CURSOR          ;   ,,
+            lda LAST_BASE+1     ;   ,,
+            sta CURSOR+1        ;   ,,
             lda #TOPLAND        ; Draw the top so it doesn't get set
             ldy #08             ;   to the wrong color by the ISR
             jsr DrawChar        ;   ,,
             lda LEVEL
-            and #$0f            ; Max out at level 16
-new_base:   tax
+            and #$0f            ; There are 16 positions used in levels, so mask
+new_base:   tax                 ; X is the level index
 get_pos:    lda LevelPos,x      ; Get base postion from the table
-            sta $02             ; Save for horizontal movement iterator
-drop_base:  lda #154
-            sta CURSOR
-            lda #>SCREEN
-            sta CURSOR+1
--loop:      ldx #RIGHT
-            jsr MoveCursor
-            dec $02
-            bne loop
-ch_floor:   jsr GetChar
-            cmp #TOPLAND
-            beq draw_base
-            ldx #DOWN
-            jsr MoveCursor
-            jmp ch_floor
-draw_base:  lda CURSOR
-            sta LAST_BASE
-            sta BASE_COL
-            lda CURSOR+1
-            sta LAST_BASE+1
-            lda #$97
-            sta BASE_COL+1
-            lda #SEABASE
-            ldy #$01
-            jsr DrawChar
-            cli
+            sta $02             ; Save position for horizontal movement iterator
+drop_base:  lda #154            ; Start at the left-hand edge
+            sta CURSOR          ; ,,
+            lda #>SCREEN        ; ,,
+            sta CURSOR+1        ; ,,
+-loop:      ldx #RIGHT          ; Step one position to the right
+            jsr MoveCursor      ; ,,
+            dec $02             ; Iterate until we've reached the position
+            bne loop            ; ,,
+-loop:      jsr GetChar         ; Drop the base until it hits the floor
+            cmp #TOPLAND        ; ,,
+            beq draw_base       ; ,,
+            ldx #DOWN           ; ,,
+            jsr MoveCursor      ; ,,
+            jmp loop            ; ,,
+draw_base:  lda CURSOR          ; Once the floor is reached, store the location
+            sta LAST_BASE       ;   of the base, and draw the base
+            sta BASE_COL        ;   ,,
+            lda CURSOR+1        ;   ,,
+            sta LAST_BASE+1     ;   ,,
+            lda #$97            ;   ,,
+            sta BASE_COL+1      ;   ,,
+            lda #SEABASE        ;   ,,
+            ldy #$01            ;   ,,
+            jsr DrawChar        ;   ,,
+            cli                 ; Restore the interrupt so stuff can keep going
             rts
             
 ; Swim
 ; Move each fish to the left                   
-Swim:       ldy #$00
--loop:      lda $1e00,y
-            cmp #FISH
-            beq MoveFishL
-            cmp #FISH+1
-            beq MoveFishL
-high_f0:    lda $1f00,y
-            cmp #FISH
-            beq MoveFishH
-            cmp #FISH+1
-            beq MoveFishH
-next_cell:  iny
-            bne loop
+Swim:       ldy #$00            ; Scan the screen in two stages for fish
+-loop:      lda $1e00,y         ; ,,
+            cmp #FISH           ; There are two fish, four pixels of travel each
+            beq MoveFishL       ; ,,
+            cmp #FISH+1         ; ,,
+            beq MoveFishL       ; ,,
+high_f0:    lda $1f00,y         ; Do the same thing bute 256 characters later
+            cmp #FISH           ; ,,
+            beq MoveFishH       ; ,,
+            cmp #FISH+1         ; ,,
+            beq MoveFishH       ; ,,
+next_cell:  iny                 ; Iterate
+            bne loop            ; ,,
             ; Fall through to Spawn
   
 ; Spawn
 ; Generate new fish
-Spawn:      jsr BASRND          ; Get random number, for the placement of
+Spawn:      jsr BASRND          ; Get random number, for the depth of
             lda RNDNUM          ;   a fish on the right-hand side of the
             and #%00000111      ;   screen
             tay                 ;   ,,
             iny                 ;   ,,
-            sty $02             
-            lda #153
-            sta CURSOR
-            lda #>SCREEN
-            sta CURSOR+1
--loop:      ldx #DOWN
-            jsr MoveCursor
-            dec $02
-            bne loop
-            lda #FISH
-            ldy #CO_FISH
-            jsr DrawChar
+            sty $02             ; Put the depth in a temporary location
+            lda #153            ; Start the cursor at the right-hand edge
+            sta CURSOR          ; ,,
+            lda #>SCREEN        ; ,,
+            sta CURSOR+1        ; ,,
+-loop:      ldx #DOWN           ; Drop down until the randomly-selected
+            jsr MoveCursor      ;   depth has been reached
+            dec $02             ;   ,,
+            bne loop            ;   ,,
+            lda #FISH           ; Draw the fish
+            ldy #CO_FISH        ; ,,
+            jsr DrawChar        ; ,,
             rts
 
 ; Move Fish
 ; To a location to the left of its current location            
-MoveFishL:  ldx #$1e
+MoveFishL:  ldx #$1e            ; Moving a fish in the top half of the screen
             .byte $3c           ; Skip word
-MoveFishH:  ldx #$1f
-            stx CURSOR+1
-            sty CURSOR
-            cmp #FISH
-            beq half_move
+MoveFishH:  ldx #$1f            ; Moving a fish in the bottom (sort of) half
+            stx CURSOR+1        ; Set the cursor
+            sty CURSOR          ; ,,
+            cmp #FISH           ; Is the fish in the first half of travel?
+            beq half_move       ; If so, move to the second half
             lda #$20            ; Replace fish with water
             ldy #$06            ; ,,
             jsr DrawChar        ; ,,
@@ -437,13 +432,13 @@ MoveFishH:  ldx #$1f
             jsr DrawChar        ;   ,,
 fish_exit:  ldy CURSOR          ; Restore Y to its previous value, since it's
             iny                 ;   an iterator within the caller
-            jmp next_cell 
-redraw:     ldx #RIGHT
-            jsr MoveCursor              
-half_move:  lda #FISH+1
-            ldy #CO_FISH
-            jsr DrawChar
-            ldy CURSOR
+            jmp next_cell
+redraw:     ldx #RIGHT          ; The moved chracter needs to be moved back
+            jsr MoveCursor      ; ,,
+half_move:  lda #FISH+1         ; Advance a fish by changing to the next
+            ldy #CO_FISH        ;   chracter, which is 4 pixels to the left
+            jsr DrawChar        ;   of the first character
+            ldy CURSOR          ;   ,,
             jmp next_cell         
                                                                                            
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -544,15 +539,15 @@ GameOver:   jsr wsStop          ; Stop the music
             jsr GetChar
             ldy #$00
             jsr DrawChar
-            lda #$00
-            ldx #$00
-            sta (BASE_COL,x)    ; Set base color to black
             lda #$02
             jsr FXLaunch
             lda #$40
             jsr Delay
             clc                 ; Clear the game playing flag
             ror PLAY_FL         ; ,,
+            lda #$00
+            ldx #$00
+            sta (BASE_COL,x)    ; Set base color to black
             jsr ShowScore
             lda #<HiTx
             ldy #>HiTx
@@ -1093,8 +1088,8 @@ FXLaunch:   sei                 ; Don't play anything while setting up
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; DATA
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-Intro:      .asc $0d,$0d,$0d,$0d,$0d,$0d,$0d,$0d,$0d,$05
-            .asc "  ",$24,"  S U B  M E D  ",$24
+Intro:      .asc $0d,$0d,$0d,$0d,$0d,$0d,$0d,$0d,$0d
+            .asc "   ",$9f,$24,$05," S U B  M E D ",$9f,$21
             .asc $0d,$0d,$0d,$9f,"  JASON JUSTIAN 2020",$0d,$0d,$0d
             .asc "      PRESS FIRE",$00
 
@@ -1181,7 +1176,8 @@ Padding:    .asc "2020 JASON JUSTIAN",$0d
             .asc "RELEASED UNDER CREATIVE COMMONS",$0d
             .asc "ATTRIBUTION-NONCOMMERCIAL 4.0",$0d
             .asc "INTERNATIONAL PUBLIC LICENSE",$0d
-            .asc "--------------------------------------",$00
+            .asc  $00
+            .asc "ALL WORK AND NO PLAY MAKES JACK A DULL BOY",$00
             .asc "ALL WORK AND NO PLAY MAKES JACK A DULL BOY",$00
             .asc "ALL WORK AND NO PLAY MAKES JACK A DULL BOY",$00
             .asc "ALL WORK AND NO PLAY MAKES JACK A DULL BOY",$00
