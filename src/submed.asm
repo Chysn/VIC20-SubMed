@@ -205,6 +205,8 @@ control:    jsr Joystick        ; Read the joystick
             jsr DrawChar        ;   ,,
             lda #PL_SPEED       ;   ,,
             sta SUBSPEED        ;   ,,
+            lda #$3f            ; Show the pitometer as stopped
+            sta $1e15           ; ,,
             bne Main            ; Check the joystick again
 ch_fire:    cmp #FIRE           ; Has fire been pressed?
             bne handle_dir      ; If not, handle a direction
@@ -520,7 +522,7 @@ show_score: sei                 ; Stop interrupt during score bar display
             jsr FXLaunch        ; ,,
             lda $02             ; Restore the oxygen temp register
 o2_bar:     cmp #$04
-            bcc finish          ; If oxygen is under 4, then wrap it up
+            bcc pit_dial        ; If oxygen is under 4, then wrap it up
             lda #O2_CHAR+1
             jsr CHROUT
             lda $02            
@@ -528,7 +530,11 @@ o2_bar:     cmp #$04
             sbc #$04
             sta $02
             jmp o2_bar
-finish:     lda #$3f
+pit_dial:   lda #$24            ; Draw pitometer dial
+            sta $1e14           ; ,,
+            lda #$01            ; ,,
+            sta $9614           ; ,,
+            lda #$3f
             sec
             sbc $02
             jsr CHROUT          ; Add the end of the oxygen meter
@@ -552,6 +558,9 @@ GameOver:   jsr wsStop          ; Stop the music
             jsr FXWait          ; Wait until the Game Over sound ends
             clc                 ; Clear the game playing flag
             ror PLAY_FL         ; ,,
+            lda #$20            ; Clear the pitometer display
+            sta $1e14           ; ,,
+            sta $1e15           ; ,,
             lda #$00            ; Show the final score
             jsr ShowScore       ; ,,
             lda #<HiTx          ; Show the high score
@@ -575,12 +584,23 @@ ShowScore:  lda #<ScoreTx
             jsr PRTFIX
             lda #" "
             jmp CHROUT
-            
+
+; Display pitometer based on current speed  
+; Speed is in Y          
+Pitometer:  pha
+            lda #$39
+            clc
+            adc SUBSPEED
+            sta $1e15
+            pla
+            rts
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; MOVEMENT ROUTINES
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;            
 ; Move player in direction specified in A (UP, DOWN, RIGHT, LEFT)
-Move:       cmp #DOWN           ; If moving up or down, there's no need to check 
+Move:       jsr Pitometer       ; Show pitometer
+            cmp #DOWN           ; If moving up or down, there's no need to check 
             beq not_turn        ;   for a directional change
             cmp #UP             ;   ,,
             beq not_turn        ;   ,,
@@ -937,7 +957,7 @@ next_reef:  lda #LANDCHAR       ; ,,
             jsr wsReset         ; Reset the music score
             jsr wsPlay          ; Start the music
             sec                 ; Set the game playing flag
-            ror PLAY_FL         ; ,,
+            ror PLAY_FL         ; ,,        
             cli                 ; Start the interrupt
             rts
 
@@ -1102,7 +1122,7 @@ FXLaunch:   sei                 ; Don't play anything while setting up
 ; DATA
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 Intro:      .asc $0d,$0d,$0d,$0d,$0d,$0d,$0d,$0d,$0d
-            .asc "   ",$9f,$24,$05," S U B  M E D ",$9f,$21
+            .asc "   ",$1c,$21,$05," S U B  M E D ",$1c,$21
             .asc $0d,$0d,$0d,$9f,"  JASON JUSTIAN 2020",$0d,$0d,$0d
             .asc "      PRESS FIRE",$00
 
@@ -1119,7 +1139,7 @@ Manual:     .asc $93,$05,"AVAST",$0d,$0d,$0d
             .asc "            AGENT ANZU",$00
 
 ; Score Bar
-ScoreTx:    .asc $13,$05," SCORE ",$00
+ScoreTx:    .asc $13,$05,"SCORE ",$00
 HiTx:       .asc "HIGH ",$00
 GameOverTx: .asc $13,$11,$11,$11,$11,$11,$11,$11,$11
             .asc $1d,$1d,$1d,$1d,$1d,$1d
@@ -1190,8 +1210,7 @@ Padding:    .asc "2020 JASON JUSTIAN",$0d
             .asc "RELEASED UNDER CREATIVE COMMONS",$0d
             .asc "ATTRIBUTION-NONCOMMERCIAL 4.0",$0d
             .asc "INTERNATIONAL PUBLIC LICENSE",$0d
-            .asc "-------------------",$00
-            .asc "ALL WORK AND NO PLAY MAKES JACK A DULL BOY",$00
+            .asc "-------------------------",$00
             .asc "ALL WORK AND NO PLAY MAKES JACK A DULL BOY",$00
             .asc "ALL WORK AND NO PLAY MAKES JACK A DULL BOY",$00
             .asc "ALL WORK AND NO PLAY MAKES JACK A DULL BOY",$00
@@ -1250,7 +1269,7 @@ CharSet:    .byte $00,$00,$3c,$42,$4a,$89,$a9,$bd ; Sea Base
             .byte $00,$18,$18,$7e,$7e,$18,$18,$00 ; Med Pack (single color)
             .byte $e7,$bd,$81,$e7,$e7,$db,$db,$c3 ; Lighthouse Upper
             .byte $c3,$bd,$bd,$81,$81,$bd,$a5,$a5 ; Lighthouse Lower
-            .byte $10,$28,$10,$7c,$10,$92,$7c,$10 ; Anchor
+            .byte $00,$18,$24,$42,$5a,$24,$18,$00 ; Pitometer
             .byte $ff,$ff,$ff,$ff,$ff,$ff,$ff,$ff ; Sea floor (multi)
             .byte $3c,$3c,$ff,$ff,$ff,$ff,$ff,$ff ; Sea floor top (multi)
             .byte $00,$00,$0d,$1e,$0d,$00,$00,$00 ; Fish 1
@@ -1273,8 +1292,8 @@ BITMAP_D:   .byte $00,$00,$00,$00,$00,$00,$00,$00 ; Bitmap Destination
             .byte $00,$38,$44,$38,$44,$44,$44,$38 ; 8
             .byte $00,$38,$44,$44,$3c,$04,$44,$38 ; 9            
             .byte $06,$f2,$96,$94,$96,$90,$f0,$00 ; O2 Indicator
-            .byte $00,$00,$00,$ff,$ff,$00,$00,$00 ; Oxygen level 4
-            .byte $00,$00,$00,$fc,$fc,$00,$00,$00 ; Oxygen level 3
-            .byte $00,$00,$00,$f0,$f0,$00,$00,$00 ; Oxygen level 2
-            .byte $00,$00,$00,$c0,$c0,$00,$00,$00 ; Oxygen level 1
-            .byte $00,$00,$00,$00,$00,$00,$00,$00 ; Oxygen level 0            
+            .byte $00,$00,$00,$ff,$ff,$00,$00,$00 ; Level 4
+            .byte $00,$00,$00,$fc,$fc,$00,$00,$00 ; Level 3
+            .byte $00,$00,$00,$f0,$f0,$00,$00,$00 ; Level 2
+            .byte $00,$00,$00,$c0,$c0,$00,$00,$00 ; Level 1
+            .byte $00,$00,$00,$00,$00,$00,$00,$00 ; Level 0            
