@@ -44,7 +44,7 @@ O2_RATE     = $80               ; Oxygen depletion rate (jiffies)
 ; Score constants
 PICKUP      = 50                ; Score when a med pack is picked up
 DELIVERY    = 100               ; Score when a med pack is delivered
-O2_ADD      = $0a               ; Oxygen added when surfacing
+O2_ADD      = 12                ; Oxygen added when surfacing
 
 ; Character constants
 CO_PLAYER   = $07               ; Player color
@@ -343,7 +343,7 @@ LevelUp:    sei                 ; Stop interrupts while we level up
             ldy #08             ;   to the wrong color by the ISR
             jsr DrawChar        ;   ,,
             lda LEVEL
-            and #$0f            ; There are 16 positions used in levels, so mask
+            and #$1f            ; There are 32 positions used in levels, so mask
 new_base:   tax                 ; X is the level index
 get_pos:    lda LevelPos,x      ; Get base postion from the table
             sta $02             ; Save position for horizontal movement iterator
@@ -1151,7 +1151,9 @@ JoyTable:   .byte 0,$04,$80,$08,$10,$20            ; Corresponding direction bit
          
 ; Level Advancement Table           
 LevelPos:   .byte $02,$04,$06,$08,$0a,$0c,$0e,$10
-            .byte $12,$14,$13,$11,$0f,$0d,$0b,$09    
+            .byte $12,$14,$13,$11,$0f,$0d,$0b,$09
+            .byte $0a,$0b,$0c,$0d,$0e,$0f,$10,$11
+            .byte $12,$13,$14,$13,$14,$13,$14,$13
    
 ; Degree to Note Value
 ; Determined with electronic tuner
@@ -1210,7 +1212,7 @@ Padding:    .asc "2020 JASON JUSTIAN",$0d
             .asc "RELEASED UNDER CREATIVE COMMONS",$0d
             .asc "ATTRIBUTION-NONCOMMERCIAL 4.0",$0d
             .asc "INTERNATIONAL PUBLIC LICENSE",$0d
-            .asc "-----------------------",$00
+            .asc "-------",$00
             .asc "ALL WORK AND NO PLAY MAKES JACK A DULL BOY",$00
             .asc "ALL WORK AND NO PLAY MAKES JACK A DULL BOY",$00
             .asc "ALL WORK AND NO PLAY MAKES JACK A DULL BOY",$00
