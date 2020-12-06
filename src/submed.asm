@@ -586,7 +586,6 @@ ShowScore:  lda #<ScoreTx
             jmp CHROUT
 
 ; Display pitometer based on current speed  
-; Speed is in Y          
 Pitometer:  pha
             lda #$38
             clc
@@ -996,6 +995,11 @@ wsReset:    lda #<Theme
             sta LEGATO
             rts
 
+; Toggle Playing
+wsToggle:   bit PLAY_FLAG
+            bmi wsStop
+            ; Fall through to wsPlay
+
 ; Begin Playing
 wsPlay:     lda ENABLE_MUS
             beq play_r
@@ -1008,11 +1012,6 @@ wsStop:     clc
             ror PLAY_FLAG
             sta VOICEM
             rts
-
-; Toggle Play
-wsToggle:   bit PLAY_FLAG
-            bmi wsStop
-            bpl wsPlay
             
 ; Service Routine           
 wsService:  bit PLAY_FLAG
@@ -1026,11 +1025,6 @@ wsService:  bit PLAY_FLAG
             lda #$00
             sta VOICEM
 keep_on:    dec COUNTDOWN
-            lda VOLUME
-            and #$0f
-            cmp #$08
-            beq svc_r
-            inc VOLUME
             rts
 fetch_note: ldx #$00
             stx COUNTDOWN       ; Initialize countdown
@@ -1117,7 +1111,7 @@ fx_r:       rts
 ; Do nothing until the current effect ends
 FXWait:     lda FX_LEN
             bne FXWait
-            jmp fx_end
+            beq fx_end
         
 ; Launch Sound Effect
 ; Preparations
@@ -1234,7 +1228,8 @@ Padding:    .asc "2020 JASON JUSTIAN",$0d
             .asc "RELEASED UNDER CREATIVE COMMONS",$0d
             .asc "ATTRIBUTION-NONCOMMERCIAL 4.0",$0d
             .asc "INTERNATIONAL PUBLIC LICENSE",$0d
-            .asc "--------------------------------",$00
+            .asc "----",$00
+            .asc "ALL WORK AND NO PLAY MAKES JACK A DULL BOY",$00
             .asc "ALL WORK AND NO PLAY MAKES JACK A DULL BOY",$00
             .asc "ALL WORK AND NO PLAY MAKES JACK A DULL BOY",$00
             .asc "ALL WORK AND NO PLAY MAKES JACK A DULL BOY",$00
